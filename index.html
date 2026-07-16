@@ -70,7 +70,7 @@
 <body>
 
 <div class="bar">
-  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v6</span></h1>
+  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v7</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim" id="wstxt">connecting…</span>
   <select id="symbol"></select>
   <button id="proxyBtn" onclick="toggleCfg()" style="position:relative;z-index:10">⚙ Proxy</button>
@@ -379,11 +379,27 @@ async function loadBalance(){
   if(!PROXY){$('posBox').innerHTML='<div class="dim">Set proxy first.</div>';return;}
   try{
     const j=await proxy('GET','/v2/wallet/balances');
-    const rows=(j.result||[]).filter(b=>+b.balance>0);
     $('wsdot').classList.add('on');$('wstxt').textContent='proxy ok';
-    if(!rows.length){$('posBox').innerHTML='<div class="dim">Wallet empty.</div>';return;}
+    // check for API error first
+    if(j.success===false){
+      $('posBox').innerHTML='<div class="r">API error: '+JSON.stringify(j.error||j)+'</div>';
+      return;
+    }
+    const all=j.result||[];
+    // tolerant field access — Delta field names can vary
+    const bal=b=>+(b.balance ?? b.wallet_balance ?? b.available_balance ?? 0);
+    const avail=b=>+(b.available_balance ?? b.available_balance_for_robo ?? b.balance ?? 0);
+    const sym=b=>b.asset_symbol || b.asset?.symbol || b.symbol || ('asset '+(b.asset_id ?? '?'));
+    const rows=all.filter(b=>bal(b)>0);
+    if(!rows.length){
+      // show raw so we can see what's actually there
+      $('posBox').innerHTML='<div class="dim" style="margin-bottom:6px">No non-zero balance found. Raw response:</div>'+
+        '<pre style="font-size:10px;white-space:pre-wrap;color:var(--dim);max-height:200px;overflow:auto">'+
+        JSON.stringify(all,null,1).replace(/</g,'&lt;')+'</pre>';
+      return;
+    }
     $('posBox').innerHTML='<table><tr><th>Asset</th><th>Balance</th><th>Available</th></tr>'+
-      rows.map(b=>`<tr><td>${b.asset_symbol||b.asset_id}</td><td>${fmt(+b.balance,4)}</td><td>${fmt(+b.available_balance,4)}</td></tr>`).join('')+'</table>';
+      rows.map(b=>`<tr><td>${sym(b)}</td><td>${fmt(bal(b),4)}</td><td>${fmt(avail(b),4)}</td></tr>`).join('')+'</table>';
   }catch(e){$('posBox').innerHTML='<div class="r">'+e.message+'</div>';$('wstxt').textContent='proxy error';}
 }
 
