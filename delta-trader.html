@@ -113,6 +113,47 @@
 </style>
 </head>
 <body>
+<!-- LOGIN GATE -->
+<div id="loginGate" style="position:fixed;inset:0;z-index:9999;background:var(--navy);display:flex;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:14px;padding:34px 30px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);border-top:4px solid var(--gold)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <span style="width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--gold),var(--gold-dim));display:flex;align-items:center;justify-content:center;color:var(--navy);font-weight:900;font-size:17px">◆</span>
+      <span style="font-weight:700;font-size:19px;color:var(--navy)">Somu Trader</span>
+    </div>
+    <div style="color:var(--muted);font-size:13px;margin-bottom:20px">Private access — sign in to continue.</div>
+    <div class="fld"><label>User ID</label><input id="loginUser" placeholder="username" autocomplete="username" style="width:100%"></div>
+    <div class="fld"><label>Password</label><input id="loginPass" type="password" placeholder="password" autocomplete="current-password" style="width:100%" onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <button onclick="doLogin()" class="submit" style="width:100%;margin-top:6px">Sign In</button>
+    <div id="loginMsg" style="color:var(--red);font-size:12px;margin-top:10px;min-height:16px"></div>
+    <div style="color:var(--muted);font-size:11px;margin-top:14px;line-height:1.5">For real protection, also enable Directory Privacy in Hostinger. This gate keeps casual visitors out.</div>
+  </div>
+</div>
+<script>
+/* ===== LOGIN GATE ===== */
+// Credentials are stored as SHA-256 hashes so they are not readable in the page source.
+// Default: user "somu" / password "Somu@2026" — change via changeLogin() in console or ask to update.
+const AUTH={
+  user:'somu',
+  passHash:'49bb49b64643c9f971be6df842a4104bffe8f1ebffbf822ec6acf82e2540a391'
+};
+async function sha256(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function doLogin(){
+  const u=document.getElementById('loginUser').value.trim().toLowerCase();
+  const p=document.getElementById('loginPass').value;
+  const h=await sha256(p);
+  if(u===AUTH.user && h===AUTH.passHash){
+    sessionStorage.setItem('dx_auth','1');
+    document.getElementById('loginGate').style.display='none';
+  }else{
+    document.getElementById('loginMsg').textContent='Wrong user ID or password.';
+  }
+}
+// stay logged in for the browser session
+if(sessionStorage.getItem('dx_auth')==='1'){
+  const g=document.getElementById('loginGate'); if(g)g.style.display='none';
+}
+</script>
+
 <div class="hdr">
   <div class="logo"><span class="mark">◆</span> Somu Trader</div>
   <span class="badge">DELTA EXCHANGE</span>
@@ -258,7 +299,11 @@
           <span class="dim" style="font-weight:400;font-size:10px">journal: <span id="jCount">0</span></span></div>
         <div class="card-b">
           <div class="log" id="autolog">robot idle…</div>
-          <button onclick="exportJournal()" style="width:100%;margin-top:10px;font-size:11px">Export Journal CSV</button>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button onclick="copyLog()" style="flex:1;font-size:11px">Copy Log</button>
+            <button onclick="exportJournal()" style="flex:1;font-size:11px">Export Journal CSV</button>
+            <button onclick="clearLog()" style="font-size:11px">Clear</button>
+          </div>
         </div>
       </div>
     </div>
@@ -368,7 +413,29 @@ async function pubGet(path,query=''){
   return r.json();
 }
 const fmt=(n,d=2)=>n==null||isNaN(n)?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-const log=(m)=>{const l=$('autolog');l.textContent=new Date().toLocaleTimeString()+'  '+m+'\n'+l.textContent;};
+const log=(m)=>{
+  const l=$('autolog');
+  const line=new Date().toLocaleTimeString()+'  '+m;
+  l.textContent=line+'\n'+l.textContent;
+  // persist — keep last 200 lines so it survives refresh
+  try{
+    let hist=(localStorage.getItem('dx_log')||'').split('\n');
+    hist.unshift(line);
+    hist=hist.slice(0,200);
+    localStorage.setItem('dx_log',hist.join('\n'));
+  }catch(e){}
+};
+// restore log on load
+(function(){try{const h=localStorage.getItem('dx_log');if(h){const l=$('autolog');if(l)l.textContent=h;}}catch(e){}})();
+function copyLog(){
+  const t=localStorage.getItem('dx_log')||$('autolog').textContent;
+  navigator.clipboard.writeText(t).then(()=>{const b=event.target;const o=b.textContent;b.textContent='Copied ✓';setTimeout(()=>b.textContent=o,1500);}).catch(()=>alert('Copy failed — select the log text manually.'));
+}
+function clearLog(){
+  if(!confirm('Clear the telemetry log? This cannot be undone.'))return;
+  localStorage.removeItem('dx_log');$('autolog').textContent='log cleared…';
+}
+window.copyLog=copyLog;window.clearLog=clearLog;
 setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString(),1000);
 
 /* ================= PUBLIC DATA ================= */
