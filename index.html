@@ -70,7 +70,7 @@
 <body>
 
 <div class="bar">
-  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v4</span></h1>
+  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v5</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim" id="wstxt">connecting…</span>
   <select id="symbol"></select>
   <button id="proxyBtn" onclick="toggleCfg()" style="position:relative;z-index:10">⚙ Proxy</button>
@@ -455,3 +455,6 @@ window.cancelOrder=cancelOrder;
 loadProducts();
 if(PROXY){setTimeout(loadBalance,800);}
 onType();
+</script>
+</body>
+</html>
