@@ -130,7 +130,7 @@
 <body>
 
 <div class="bar">
-  <h1>🌱 Delta Trader <span class="v">v21</span></h1>
+  <h1>🌱 Delta Trader <span class="v">v22</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:12px">connecting…</span>
   <select id="symbol"></select>
   <span id="envPill" class="pill-env"></span>
@@ -310,7 +310,7 @@
         </div>
         <div class="row2">
           <div class="fld" style="margin:0"><label id="sizeLbl">Balance % per trade</label><input id="botPct" type="number" step="1" value="10" style="padding:5px"></div>
-          <div class="fld" style="margin:0"><label>Min strength</label><input id="botScore" type="number" step="0.05" value="0.55" style="padding:5px"></div>
+          <div class="fld" style="margin:0"><label>Min strength</label><input id="botScore" type="number" step="0.05" value="0.30" style="padding:5px"></div>
         </div>
         <div class="fld" style="margin:8px 0 0"><label>Cooldown between trades (minutes)</label><input id="botCooldown" type="number" step="1" value="3" style="padding:5px"></div>
         <input id="botSize" type="hidden" value="1">
@@ -1018,7 +1018,12 @@ async function robotTick(){
     const minStr=+($('botScore').value||0.55);
     // pick strongest coin that: has direction, clears strength, and NOT recently traded
     const pick=lastScan.find(c=>c.dir!=='—' && c.strength>=minStr && !recentCoins.includes(c.sym));
-    if(!pick){log('🤖 no fresh coin ≥ strength '+minStr+' (avoiding recent: '+(recentCoins.join(',')||'none')+') — waiting');botBusy=false;return;}
+    if(!pick){
+      const best=lastScan.find(c=>c.dir!=='—' && !recentCoins.includes(c.sym));
+      const bestTxt = best ? `best is ${best.sym} at ${best.strength.toFixed(2)} (need ${minStr})` : 'no directional coin found';
+      log('🤖 waiting — '+bestTxt+(recentCoins.length?' · skipping recent: '+recentCoins.join(','):''));
+      botBusy=false;return;
+    }
 
     // 3. verify no open position anywhere (true one-at-a-time)
     const pj=await proxy('GET','/v2/positions/margined');
