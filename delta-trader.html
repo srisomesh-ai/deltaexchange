@@ -110,12 +110,22 @@
   .warn{background:#fff8e6;border:1px solid #ffe4a3;color:#a86b00;border-radius:12px;padding:10px 16px;font-size:12px;font-weight:500}
   .env-tag{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px}
   .pill-env{padding:5px 12px;border-radius:20px;font-weight:700;font-size:12px;border:0}
+
+  /* market scanner */
+  .scan-row{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:9px 11px;border-radius:10px;cursor:pointer;transition:all .12s;border:1px solid transparent}
+  .scan-row:hover{background:var(--panel2);border-color:var(--line)}
+  .scan-row.sel{background:var(--green-bg);border-color:var(--green)}
+  .scan-rank{font-weight:800;color:var(--dim);font-size:13px;width:18px}
+  .scan-sym{font-weight:700;font-size:13px}
+  .scan-chg{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .scan-dir{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px}
+  .scan-score{font-weight:700;font-variant-numeric:tabular-nums;font-size:13px;min-width:44px;text-align:right}
 </style>
 </head>
 <body>
 
 <div class="bar">
-  <h1>🌱 Delta Trader <span class="v">v13</span></h1>
+  <h1>🌱 Delta Trader <span class="v">v14</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:12px">connecting…</span>
   <select id="symbol"></select>
   <span id="envPill" class="pill-env"></span>
@@ -175,8 +185,16 @@
     </div>
   </div>
 
-  <!-- CENTER: orderbook + positions -->
+  <!-- CENTER: scanner + orderbook + positions -->
   <div class="col">
+    <div class="card">
+      <h2>🔍 Market Scanner — Top Opportunities <button onclick="runScan()" id="scanBtn" style="font-size:11px;padding:5px 12px;font-weight:600">Scan now</button></h2>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Scans the most liquid perpetuals and ranks by momentum + signal strength. Tap a coin to load it, then decide.</div>
+      <div id="scanList"><div class="dim" style="font-size:12px">Tap "Scan now" to find trending coins.</div></div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:11px;margin-top:10px;color:var(--dim)">
+        <input type="checkbox" id="autoScan" style="width:auto"> Auto-refresh scan every 30s</label>
+    </div>
+
     <div class="card ob-card">
       <h2>Order Book <span class="dim" style="font-weight:500">live</span></h2>
       <div class="ob-wrap">
@@ -627,6 +645,55 @@ async function cancelOrder(id,pid){
 }
 
 /* ================= AUTO ENGINE (dry-run scaffold) ================= */
+/* ================= MARKET SCANNER ================= */
+let scanning=false;
+async function runScan(){
+  if(scanning)return; scanning=true;
+  const btn=$('scanBtn'); if(btn){btn.textContent='Scanning…';btn.disabled=true;}
+  try{
+    const j=await pubGet('/v2/tickers');
+    let all=(j.result||[]).filter(t=>{
+      const sym=t.symbol||'';
+      return t.contract_type==='perpetual_futures' || (sym.endsWith('USD') && t.mark_price);
+    });
+    all.sort((a,b)=>(+b.turnover_usd||+b.volume||0)-(+a.turnover_usd||+a.volume||0));
+    const top=all.slice(0,15);
+    const scored=top.map(t=>{
+      const mark=+t.mark_price||0, spot=+t.spot_price||mark;
+      let chg=+t.change_24h; if(chg!=null&&Math.abs(chg)<1)chg=chg*100;
+      const fr=+t.funding_rate||0;
+      const basis=spot? (mark-spot)/spot*100 : 0;
+      const dirScore=(chg||0)*0.5 + basis*2 - fr*1500;
+      const strength=Math.min(1, (Math.abs(chg||0)/3)*0.6 + Math.abs(basis)/0.2*0.2 + Math.abs(fr)*1000*0.2);
+      const dir = dirScore>0?'LONG':dirScore<0?'SHORT':'—';
+      return {sym:t.symbol, chg:chg||0, mark, dir, strength:+strength.toFixed(2), fr};
+    });
+    scored.sort((a,b)=>b.strength-a.strength);
+    renderScan(scored.slice(0,5));
+  }catch(e){$('scanList').innerHTML='<div class="r" style="font-size:12px">Scan failed: '+e.message+'</div>';}
+  scanning=false;
+  if(btn){btn.textContent='Scan now';btn.disabled=false;}
+}
+function renderScan(list){
+  if(!list.length){$('scanList').innerHTML='<div class="dim">No results.</div>';return;}
+  $('scanList').innerHTML=list.map((c,i)=>{
+    const dcol=c.dir==='LONG'?'var(--green)':c.dir==='SHORT'?'var(--red)':'var(--dim)';
+    const dbg=c.dir==='LONG'?'var(--green-bg)':c.dir==='SHORT'?'var(--red-bg)':'var(--panel2)';
+    const sel=(cur&&cur.symbol===c.sym)?' sel':'';
+    return `<div class="scan-row${sel}" onclick="pickScan('${c.sym}')">
+      <span class="scan-rank">${i+1}</span>
+      <span><span class="scan-sym">${c.sym}</span><br><span class="scan-chg ${c.chg>=0?'g':'r'}">${c.chg>=0?'+':''}${c.chg.toFixed(2)}% 24h</span></span>
+      <span class="scan-dir" style="color:${dcol};background:${dbg}">${c.dir}</span>
+      <span class="scan-score" style="color:${dcol}">${(c.strength*100).toFixed(0)}</span>
+    </div>`;
+  }).join('');
+}
+function pickScan(sym){
+  const sel=$('symbol'); if(sel)sel.value=sym;
+  selectSymbol(sym);
+  log('📊 loaded '+sym+' from scanner');
+}
+
 /* ================= SIGNAL ENGINE (observe & log, no orders) ================= */
 let priceHist=[];     // {t, mark}
 let oiHist=[];        // {t, oi}
@@ -824,6 +891,12 @@ document.getElementById('saveCfgBtn')?.addEventListener('click',saveCfg);
 window.toggleCfg=toggleCfg; window.saveCfg=saveCfg; window.placeOrder=placeOrder;
 window.setSide=setSide; window.onType=onType; window.posTab=posTab;
 window.cancelOrder=cancelOrder; window.exportJournal=exportJournal; window.setEnv=setEnv;
+window.runScan=runScan; window.pickScan=pickScan;
+let autoScanTimer=null;
+$('autoScan')?.addEventListener('change',()=>{
+  if($('autoScan').checked){runScan();autoScanTimer=setInterval(runScan,30000);}
+  else{clearInterval(autoScanTimer);}
+});
 refreshEnvUI();
 
 // robot status wiring + confirmations
