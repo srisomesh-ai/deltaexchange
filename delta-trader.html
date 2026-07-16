@@ -70,7 +70,7 @@
 <body>
 
 <div class="bar">
-  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v9</span></h1>
+  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v10</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim" id="wstxt">connecting…</span>
   <select id="symbol"></select>
   <button id="proxyBtn" onclick="toggleCfg()" style="position:relative;z-index:10">⚙ Proxy</button>
@@ -84,6 +84,12 @@
 <!-- ALWAYS-VISIBLE PROXY BAR (no button needed) -->
 <div style="background:var(--panel2);border:1px solid var(--accent);border-radius:10px;padding:12px;margin:10px">
   <div style="font-size:11px;color:var(--dim);margin-bottom:8px">⚙ PROXY CONNECTION — fill these to load balance &amp; enable trading</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+    <span style="font-size:12px;color:var(--dim)">Environment:</span>
+    <button id="envLive" onclick="setEnv('live')" style="padding:6px 14px;font-weight:700">🔴 LIVE</button>
+    <button id="envTest" onclick="setEnv('testnet')" style="padding:6px 14px;font-weight:700">🧪 TESTNET</button>
+    <span id="envLabel" style="font-size:11px;color:var(--amber)"></span>
+  </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <input id="cfgUrl" placeholder="Proxy URL (https://.../delta-proxy.php)" style="flex:2;min-width:200px">
     <input id="cfgTok" placeholder="Token" style="flex:1;min-width:120px">
@@ -206,6 +212,16 @@
         <button onclick="exportJournal()" style="padding:6px 10px;font-size:12px">⬇ Export journal</button>
       </div>
 
+      <div id="robotBox" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700">
+          <input type="checkbox" id="autoExec" style="width:auto"> 🤖 AUTO-EXECUTE trades</label>
+        <div id="autoExecMsg" style="font-size:10px;color:var(--dim);margin-top:4px">Places real orders on strong signals, with bracket SL/TP. One position at a time. <b>Testnet only</b> until proven.</div>
+        <div class="row2" style="margin-top:6px">
+          <div class="fld" style="margin:0"><label style="font-size:10px">Robot size (contracts)</label><input id="botSize" type="number" value="1" style="padding:5px"></div>
+          <div class="fld" style="margin:0"><label style="font-size:10px">Min score to fire</label><input id="botScore" type="number" step="0.05" value="0.45" style="padding:5px"></div>
+        </div>
+      </div>
+
       <div style="font-size:10px;color:var(--dim);margin-bottom:4px">SIGNAL JOURNAL (<span id="jCount">0</span>) — outcome tracked 60s after each</div>
       <div class="log" id="autolog" style="max-height:160px">engine idle…</div>
     </div>
@@ -217,6 +233,7 @@
 const PUB = 'https://api.india.delta.exchange';   // public market data (no auth)
 let PROXY = localStorage.getItem('dx_proxy') || '';
 let PTOKEN = localStorage.getItem('dx_token') || '';
+let ENV = localStorage.getItem('dx_env') || 'live';   // 'live' or 'testnet'
 let products = [];      // perpetual futures
 let cur = null;         // current product object
 let side = 'buy';
@@ -229,7 +246,7 @@ const $=id=>document.getElementById(id);
 async function pubGet(path,query=''){
   if(PROXY){
     const r=await fetch(PROXY,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({public:true,method:'GET',path,query})});
+      body:JSON.stringify({env:ENV,public:true,method:'GET',path,query})});
     return r.json();
   }
   const r=await fetch(PUB+path+query);
@@ -357,6 +374,27 @@ function toggleCfg(){
   const el=$('cfgUrl');
   if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.focus();}
 }
+function setEnv(e){
+  ENV=e; localStorage.setItem('dx_env',e);
+  refreshEnvUI();
+  // reload everything under new env
+  loadProducts(); loadBalance();
+  log('switched to '+e.toUpperCase());
+}
+function refreshEnvUI(){
+  const live=ENV==='live';
+  const lb=$('envLive'), tb=$('envTest');
+  if(lb){lb.style.background=live?'var(--red)':'var(--panel2)';lb.style.borderColor=live?'var(--red)':'var(--line)';lb.style.color=live?'#fff':'var(--dim)';}
+  if(tb){tb.style.background=!live?'var(--green)':'var(--panel2)';tb.style.borderColor=!live?'var(--green)':'var(--line)';tb.style.color=!live?'#fff':'var(--dim)';}
+  const el=$('envLabel'); if(el)el.textContent=live?'⚠ REAL MONEY':'✓ fake money — safe to test robot';
+  // auto-exec only allowed on testnet
+  const ae=$('autoExec'), aem=$('autoExecMsg');
+  if(ae){
+    if(live){ae.checked=false;ae.disabled=true;if(aem)aem.innerHTML='<span class="r">🔒 Auto-execute locked on LIVE. Switch to TESTNET to let the robot trade.</span>';}
+    else{ae.disabled=false;if(aem)aem.innerHTML='Places real orders on strong signals, with bracket SL/TP. One position at a time. <span class="g">Testnet — safe.</span>';}
+  }
+}
+
 function saveCfg(){
   PROXY=$('cfgUrl').value.trim(); PTOKEN=$('cfgTok').value.trim();
   localStorage.setItem('dx_proxy',PROXY); localStorage.setItem('dx_token',PTOKEN);
@@ -374,7 +412,7 @@ async function proxy(method,path,{query='',body=null}={}){
   const r=await fetch(PROXY,{
     method:'POST',
     headers:{'Content-Type':'application/json','X-Proxy-Token':PTOKEN},
-    body:JSON.stringify({method,path,query,body})
+    body:JSON.stringify({env:ENV,method,path,query,body})
   });
   return r.json();
 }
@@ -591,6 +629,10 @@ function runSignal(imb){
     journal.push(entry);
     $('jCount').textContent=journal.length;
     log(`▶ ${dir} @ ${fmt(mark,priceDp())}  score=${score.toFixed(2)} [ob${obScore.toFixed(1)} mo${momPct.toFixed(2)} oi${(oiDelta*100).toFixed(1)} fu${(fr*100).toFixed(3)}]`);
+
+    // --- AUTO-EXECUTE (testnet only, one position at a time) ---
+    maybeAutoExecute(dir, score, mark);
+
     // check outcome 60s later
     setTimeout(()=>{
       const px=+ticker.mark_price;
@@ -601,6 +643,42 @@ function runSignal(imb){
     },60000);
   }
   lastSigDir=dir;
+}
+
+let botBusy=false;   // prevents overlap while checking/placing
+async function maybeAutoExecute(dir, score, mark){
+  const ae=$('autoExec');
+  if(!ae?.checked) return;
+  if(ENV!=='testnet'){log('   ⚠ auto-exec ignored (not testnet)');return;}
+  const minScore=+$('botScore').value||0.45;
+  if(Math.abs(score)<minScore){log(`   ·score ${score.toFixed(2)} < min ${minScore}, no trade`);return;}
+  if(botBusy)return;
+  botBusy=true;
+  try{
+    // ONE POSITION AT A TIME: check for any open position on this symbol
+    const pj=await proxy('GET','/v2/positions/margined');
+    const openHere=(pj.result||[]).some(p=>+p.size!==0 && (p.product_symbol===cur.symbol||p.product_id===cur.id));
+    if(openHere){log('   ·position already open, robot waits');botBusy=false;return;}
+
+    const botSide = dir==='LONG'?'buy':'sell';
+    const size=parseInt($('botSize').value)||1;
+    const slP=+$('slPct').value||0.3, tpP=+$('tpPct').value||0.6;
+    const isBuy=botSide==='buy';
+    const sl=roundTick(isBuy?mark*(1-slP/100):mark*(1+slP/100));
+    const tp=roundTick(isBuy?mark*(1+tpP/100):mark*(1-tpP/100));
+    const body={
+      product_id:cur.id, product_symbol:cur.symbol, size, side:botSide, order_type:'market_order',
+      bracket_stop_loss_price:String(sl), bracket_stop_loss_limit_price:String(sl),
+      bracket_take_profit_price:String(tp), bracket_take_profit_limit_price:String(tp),
+      bracket_stop_trigger_method:'mark_price'
+    };
+    const lev=parseInt($('lev').value)||10;
+    await proxy('POST','/v2/products/'+cur.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
+    const j=await proxy('POST','/v2/orders',{body});
+    if(j.success===false){log('   🤖✗ rejected: '+JSON.stringify(j.error));}
+    else{log(`   🤖✓ ${botSide.toUpperCase()} ${size} @mkt  SL ${sl} TP ${tp}  id=${j.result?.id}`);loadPositions();}
+  }catch(e){log('   🤖 error: '+e.message);}
+  botBusy=false;
 }
 
 function exportJournal(){
@@ -624,7 +702,8 @@ document.getElementById('proxyBtn')?.addEventListener('click',toggleCfg);
 document.getElementById('saveCfgBtn')?.addEventListener('click',saveCfg);
 window.toggleCfg=toggleCfg; window.saveCfg=saveCfg; window.placeOrder=placeOrder;
 window.setSide=setSide; window.onType=onType; window.posTab=posTab;
-window.cancelOrder=cancelOrder; window.exportJournal=exportJournal;
+window.cancelOrder=cancelOrder; window.exportJournal=exportJournal; window.setEnv=setEnv;
+refreshEnvUI();
 loadProducts();
 if(PROXY){setTimeout(loadBalance,800);}
 onType();

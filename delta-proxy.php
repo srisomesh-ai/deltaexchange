@@ -25,19 +25,30 @@
  *     can trade your account.
  */
 
-// ====== LOAD CONFIG (secrets live in delta-config.php, NOT in repo) ==
-$BASE_URL = 'https://api.india.delta.exchange';   // India production
-$cfgFile  = __DIR__ . '/delta-config.php';
+// ====== READ INPUT FIRST (so we can pick env), THEN LOAD CONFIG ======
+$raw = file_get_contents('php://input');
+$req = json_decode($raw, true);
+if (!is_array($req)) $req = [];   // allow empty for OPTIONS/whatismyip
+
+// env: 'testnet' loads delta-config-testnet.php + testnet base url
+$env = ($req['env'] ?? '') === 'testnet' ? 'testnet' : 'live';
+if ($env === 'testnet') {
+    $BASE_URL = 'https://cdn-ind.testnet.deltaex.org';
+    $cfgFile  = __DIR__ . '/delta-config-testnet.php';
+} else {
+    $BASE_URL = 'https://api.india.delta.exchange';
+    $cfgFile  = __DIR__ . '/delta-config.php';
+}
 if (!file_exists($cfgFile)) {
     http_response_code(500);
-    echo json_encode(['success'=>false,'error'=>'delta-config.php missing on server. Create it with your API keys.']);
+    echo json_encode(['success'=>false,'error'=>basename($cfgFile).' missing on server. Create it with your '.$env.' API keys.']);
     exit;
 }
 require $cfgFile;   // defines $API_KEY, $API_SECRET, $PROXY_TOKEN, $ALLOWED_ORIGIN
 if (!isset($ALLOWED_ORIGIN)) $ALLOWED_ORIGIN = '*';
 if (empty($API_KEY) || empty($API_SECRET) || empty($PROXY_TOKEN)) {
     http_response_code(500);
-    echo json_encode(['success'=>false,'error'=>'delta-config.php is missing one of API_KEY / API_SECRET / PROXY_TOKEN.']);
+    echo json_encode(['success'=>false,'error'=>basename($cfgFile).' is missing one of API_KEY / API_SECRET / PROXY_TOKEN.']);
     exit;
 }
 // ====================================================================
@@ -49,14 +60,7 @@ header('Access-Control-Allow-Methods: POST, OPTIONS');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
-// ---- read request ----
-$raw = file_get_contents('php://input');
-$req = json_decode($raw, true);
-if (!is_array($req)) {
-    http_response_code(400);
-    echo json_encode(['success' => false, 'error' => 'bad json']);
-    exit;
-}
+// ---- request already parsed at top into $req ----
 
 // ---- PUBLIC passthrough (market data): no token, no signature ----
 // Dashboard sends {"public":true,"method":"GET","path":"/v2/tickers/BTCUSD"}

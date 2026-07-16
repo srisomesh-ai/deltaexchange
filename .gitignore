@@ -1,2 +1,3 @@
 # NEVER commit real secrets
 delta-config.php
+delta-config-testnet.php
