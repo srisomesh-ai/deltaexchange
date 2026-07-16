@@ -3,388 +3,336 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>◆ AURUM — AI Trading Core v24</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<title>Somu Trader — Delta Exchange</title>
 <style>
-  :root{
-    --void:#08080d; --deck:#0f0f17; --panel:#14141f; --panel2:#1b1b28;
-    --edge:#2a2418; --gold:#d4af37; --gold-hi:#f5d576; --gold-dim:#8a6d1e;
-    --bronze:#6b5518; --txt:#e8e8f0; --dim:#7d7d93; --dimmer:#4a4a5e;
-    --green:#3ee08a; --red:#ff5265; --cyan:#4fd6e0;
-    --disp:'Orbitron',sans-serif; --body:'Rajdhani',sans-serif; --mono:'JetBrains Mono',monospace;
-  }
   *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{background:var(--void);color:var(--txt);font-family:var(--body);font-size:14px;overflow-x:hidden;
-    background-image:radial-gradient(circle at 50% 0%,rgba(212,175,55,.06),transparent 60%),radial-gradient(circle at 80% 80%,rgba(79,214,224,.03),transparent 50%);
-    background-attachment:fixed;min-height:100vh}
-  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
-  .g{color:var(--green)} .r{color:var(--red)} .dim{color:var(--dim)}
-  ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:var(--void)}
-  ::-webkit-scrollbar-thumb{background:var(--gold-dim);border-radius:3px}
-  button,input,select{font-family:var(--body)}
-  input,select{background:var(--panel2);color:var(--txt);border:1px solid var(--edge);border-radius:6px;padding:8px 10px;font-size:13px;font-family:var(--mono)}
+  :root{
+    --bg:#f4f6f8;--card:#ffffff;--line:#e3e8ee;--navy:#1a2b4a;--navy2:#243a63;
+    --gold:#c8a24a;--gold-dim:#b8912f;--txt:#1f2a3d;--muted:#6b7688;
+    --green:#1a9d5a;--green-bg:#e7f5ee;--red:#d64550;--red-bg:#fbeced;--amber:#c8862a;
+  }
+  body{background:var(--bg);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:var(--txt);font-size:14px}
+  .num,.mono{font-variant-numeric:tabular-nums}
+  .g{color:var(--green)} .r{color:var(--red)} .dim{color:var(--muted)}
+  a{color:var(--navy)}
+  input,select,button{font-family:inherit}
+  input,select{background:#f8fafc;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:9px 11px;font-size:13px;font-variant-numeric:tabular-nums}
   input:focus,select:focus{outline:none;border-color:var(--gold)}
-  button{cursor:pointer;transition:all .18s;border:1px solid var(--edge);background:var(--panel2);color:var(--txt);border-radius:6px;padding:8px 12px}
-  button:hover{border-color:var(--gold);color:var(--gold-hi)}
+  button{cursor:pointer;transition:all .15s;background:#fff;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:8px 12px;font-size:13px}
+  button:hover{border-color:var(--gold)}
 
-  /* top command bar */
-  .topbar{display:flex;align-items:center;gap:16px;padding:0 22px;height:60px;
-    background:linear-gradient(180deg,rgba(20,20,31,.95),rgba(15,15,23,.85));
-    border-bottom:1px solid var(--edge);position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);flex-wrap:wrap}
-  .brand{font-family:var(--disp);font-weight:900;font-size:20px;letter-spacing:3px;
-    background:linear-gradient(180deg,var(--gold-hi),var(--gold) 55%,var(--bronze));
-    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
-    display:flex;align-items:center;gap:9px}
-  .brand .v{font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--dim);-webkit-text-fill-color:var(--dim);
-    border:1px solid var(--edge);padding:2px 7px;border-radius:20px}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 10px var(--red)}
-  .dot.on{background:var(--green);box-shadow:0 0 10px var(--green)}
-  .pill-env{font-family:var(--disp);font-weight:700;font-size:11px;letter-spacing:1.5px;padding:5px 14px;border-radius:20px;border:1px solid var(--edge)}
+  /* navy header + gold rule */
+  .hdr{background:var(--navy);border-bottom:3px solid var(--gold);padding:0 22px;height:58px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100;flex-wrap:wrap}
+  .hdr .logo{display:flex;align-items:center;gap:9px;color:#fff;font-weight:700;font-size:17px;letter-spacing:.3px}
+  .hdr .logo .mark{width:28px;height:28px;border-radius:6px;background:linear-gradient(135deg,var(--gold),var(--gold-dim));display:flex;align-items:center;justify-content:center;color:var(--navy);font-weight:900;font-size:14px}
+  .hdr .badge{background:rgba(255,255,255,.12);color:#fff;font-size:10px;font-weight:600;padding:4px 10px;border-radius:5px;letter-spacing:.5px}
+  .hdr select{background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.18);max-width:150px}
+  .hdr .right{margin-left:auto;color:#b9c4d6;font-size:12px;display:flex;align-items:center;gap:10px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--red);display:inline-block}
+  .dot.on{background:#4ade80}
+  .pill-env{font-size:10px;font-weight:700;padding:4px 12px;border-radius:5px;letter-spacing:.5px;border:0}
 
-  .deck{max-width:1440px;margin:0 auto;padding:20px;display:grid;grid-template-columns:320px minmax(0,1fr) 340px;gap:20px;align-items:start}
-  @media(max-width:1200px){.deck{grid-template-columns:1fr}}
-  .stack{display:flex;flex-direction:column;gap:20px;min-width:0}
+  .wrap{max-width:1280px;margin:18px auto;padding:0 22px}
+  .grid{display:grid;grid-template-columns:290px minmax(0,1fr) 320px;gap:18px;align-items:start}
+  @media(max-width:1080px){.grid{grid-template-columns:1fr}}
+  .col{display:flex;flex-direction:column;gap:18px;min-width:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 1px 3px rgba(26,43,74,.06);overflow:hidden}
+  .card-h{padding:12px 15px;border-bottom:1px solid var(--line);font-weight:700;font-size:11px;letter-spacing:.6px;color:var(--navy);text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
+  .card-h .l{display:flex;align-items:center}
+  .card-h .mk{width:3px;height:13px;background:var(--gold);border-radius:2px;margin-right:8px}
+  .card-b{padding:15px}
 
-  /* HUD panel */
-  .hud{background:linear-gradient(160deg,rgba(27,27,40,.6),rgba(15,15,23,.75));
-    border:1px solid var(--edge);border-radius:14px;padding:18px;position:relative;overflow:hidden}
-  .hud::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;
-    background:linear-gradient(90deg,transparent,var(--gold),transparent);opacity:.5}
-  .hud h2{font-family:var(--disp);font-weight:700;font-size:11px;letter-spacing:2.5px;text-transform:uppercase;
-    color:var(--gold);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
-  .eyebrow{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--dim);text-transform:uppercase}
+  .price{font-size:26px;font-weight:700;letter-spacing:-.5px;color:var(--navy)}
+  .price-sub{color:var(--muted);font-size:12px;margin-top:3px}
+  .kv{display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:13px;border-top:1px solid var(--line)}
+  .kv:first-child{border-top:0}
+  .kv .lbl{color:var(--muted)} .kv .v{font-weight:600;font-variant-numeric:tabular-nums}
 
-  .kv{display:flex;justify-content:space-between;align-items:center;padding:7px 0}
-  .kv+.kv{border-top:1px solid rgba(42,36,24,.5)}
-  .kv .lbl{color:var(--dim);font-size:12px;letter-spacing:.5px}
-  .kv .v{font-family:var(--mono);font-weight:600;font-size:13px}
+  /* scanner */
+  .scan-row{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 8px;border-radius:7px;cursor:pointer;border:1px solid transparent}
+  .scan-row:hover{background:#f8fafc;border-color:var(--line)}
+  .scan-row.sel{background:var(--green-bg);border-color:var(--green)}
+  .scan-rank{font-weight:700;color:var(--gold-dim);width:16px}
+  .scan-sym{font-weight:700;color:var(--navy);font-size:13px}
+  .scan-chg{font-size:11px}
+  .scan-dir{font-size:10px;font-weight:700;padding:3px 9px;border-radius:4px;letter-spacing:.5px}
+  .scan-score{font-weight:700;font-variant-numeric:tabular-nums;min-width:32px;text-align:right}
 
-  /* ===== THE CORE — signature element ===== */
-  .core-wrap{display:flex;flex-direction:column;align-items:center;padding:10px 0 4px}
-  .core{position:relative;width:280px;height:280px;display:flex;align-items:center;justify-content:center;margin:8px 0}
-  .ring{position:absolute;border-radius:50%;border:1px solid var(--gold-dim)}
-  .ring.r1{inset:0;border-color:rgba(212,175,55,.25)}
-  .ring.r2{inset:26px;border-color:rgba(212,175,55,.15);border-style:dashed}
-  .ring.r3{inset:52px;border-color:rgba(212,175,55,.35)}
-  .ring.spin{animation:spin 14s linear infinite}
-  .ring.spin-rev{animation:spin 20s linear infinite reverse}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .core-orb{width:150px;height:150px;border-radius:50%;position:relative;z-index:2;
-    background:radial-gradient(circle at 38% 34%,var(--gold-hi),var(--gold) 42%,var(--bronze) 74%,#231b08 100%);
-    box-shadow:0 0 50px rgba(212,175,55,.4),inset 0 0 40px rgba(0,0,0,.5),inset 8px 8px 24px rgba(245,213,118,.35);
-    display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
-    transition:all .6s ease;animation:breathe 4s ease-in-out infinite}
-  @keyframes breathe{0%,100%{box-shadow:0 0 40px rgba(212,175,55,.3),inset 0 0 40px rgba(0,0,0,.5),inset 8px 8px 24px rgba(245,213,118,.3)}
-    50%{box-shadow:0 0 70px rgba(212,175,55,.55),inset 0 0 40px rgba(0,0,0,.5),inset 8px 8px 28px rgba(245,213,118,.45)}}
-  .core-orb.scanning{animation:breathe 1.6s ease-in-out infinite}
-  .core-orb.locked{background:radial-gradient(circle at 38% 34%,#7dffb0,var(--green) 45%,#0d6b3a 78%,#052718 100%);
-    box-shadow:0 0 70px rgba(62,224,138,.6),inset 0 0 40px rgba(0,0,0,.5),inset 8px 8px 28px rgba(125,255,176,.4)}
-  .core-orb.blocked{background:radial-gradient(circle at 38% 34%,#ff8a96,var(--red) 45%,#7a1420 78%,#2a0810 100%);
-    box-shadow:0 0 60px rgba(255,82,101,.5),inset 0 0 40px rgba(0,0,0,.5)}
-  .core-state{font-family:var(--disp);font-weight:900;font-size:15px;letter-spacing:1px;color:#1a1408;line-height:1;text-shadow:0 1px 2px rgba(245,213,118,.5)}
-  .core-sub{font-family:var(--mono);font-size:9px;color:rgba(26,20,8,.7);margin-top:5px;letter-spacing:.5px;font-weight:600;max-width:120px}
-  .core-coin{font-family:var(--disp);font-weight:900;font-size:20px;letter-spacing:1px;color:#04140c}
+  .sr-row{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--line)}
+  .sr-row:hover{background:#f8fafc}
+  .sr-sym{font-weight:700;color:var(--navy)}
 
-  .core-readout{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:center;margin-top:6px;letter-spacing:.5px;min-height:16px}
-  .core-score{font-family:var(--disp);font-weight:700;font-size:13px;letter-spacing:2px;margin-top:2px}
+  /* robot status */
+  .robot-status{border-left:4px solid var(--muted);background:#f8fafc;border-radius:6px;padding:13px 15px;margin-bottom:14px}
+  .robot-status .st{font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px}
+  .robot-status .dt{color:var(--muted);font-size:12px;margin-top:6px;line-height:1.6}
+  .robot-status .dt b{color:var(--txt)}
+  .gauge{text-align:center;padding:16px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;margin-bottom:14px}
+  .gauge .dir-big{font-size:22px;font-weight:800;color:var(--navy)}
+  .gauge .score{font-size:12px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
 
-  /* signal bars under core */
-  .sig-bars{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%;margin-top:14px}
-  .sig-cell{background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:9px 6px;text-align:center}
-  .sig-cell .lbl{font-family:var(--mono);font-size:8px;letter-spacing:1px;color:var(--dim);text-transform:uppercase}
-  .sig-cell .val{font-family:var(--mono);font-weight:600;font-size:13px;margin-top:4px}
+  .sig-bars{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+  .sig-cell{background:#f8fafc;border:1px solid var(--line);border-radius:7px;padding:9px 5px;text-align:center}
+  .sig-cell .lbl{font-size:9px;letter-spacing:.5px;color:var(--muted);text-transform:uppercase}
+  .sig-cell .val{font-weight:600;font-size:13px;margin-top:4px;font-variant-numeric:tabular-nums}
 
-  /* toggle switches */
-  .switch{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-top:1px solid rgba(42,36,24,.5)}
-  .switch:first-of-type{border-top:0}
-  .switch label{font-family:var(--disp);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;font-weight:600}
-  .toggle{position:relative;width:46px;height:24px;background:var(--panel2);border:1px solid var(--edge);border-radius:20px;cursor:pointer;transition:all .2s;flex-shrink:0}
-  .toggle::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--dim);transition:all .2s}
-  .toggle.on{background:linear-gradient(90deg,var(--bronze),var(--gold));border-color:var(--gold)}
-  .toggle.on::after{left:24px;background:var(--gold-hi);box-shadow:0 0 10px var(--gold-hi)}
-  .toggle.on.grn{background:linear-gradient(90deg,#0d6b3a,var(--green));border-color:var(--green)}
-  .toggle.on.grn::after{background:#7dffb0;box-shadow:0 0 10px var(--green)}
+  .toggle-row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-top:1px solid var(--line)}
+  .toggle-row:first-child{border-top:0}
+  .toggle-row label{font-weight:600;font-size:13px}
+  .sw{width:42px;height:23px;border-radius:20px;background:#cdd5e0;position:relative;cursor:pointer;transition:.2s;flex-shrink:0}
+  .sw.on{background:var(--green)}
+  .sw.on.gold{background:var(--gold)}
+  .sw::after{content:'';position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+  .sw.on::after{left:22px}
 
-  /* scanner radar list */
-  .scan-row{display:grid;grid-template-columns:auto 1fr auto auto;gap:11px;align-items:center;padding:10px 12px;
-    border-radius:9px;cursor:pointer;border:1px solid transparent;transition:all .14s}
-  .scan-row:hover{background:var(--panel2);border-color:var(--edge)}
-  .scan-row.sel{background:rgba(212,175,55,.08);border-color:var(--gold-dim)}
-  .scan-rank{font-family:var(--disp);font-weight:900;color:var(--gold);font-size:13px;width:20px}
-  .scan-sym{font-family:var(--disp);font-weight:700;font-size:13px;letter-spacing:.5px}
-  .scan-chg{font-family:var(--mono);font-size:11px}
-  .scan-dir{font-family:var(--disp);font-size:10px;font-weight:700;letter-spacing:1px;padding:3px 10px;border-radius:20px}
-  .scan-score{font-family:var(--mono);font-weight:600;font-size:14px;min-width:38px;text-align:right}
-
-  .sr-row{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--edge)}
-  .sr-row:hover{background:var(--panel2)}
-  .sr-sym{font-family:var(--disp);font-weight:700}
-
-  /* buy/sell */
-  .side-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-  .side-btns button{padding:13px;font-family:var(--disp);font-weight:700;font-size:12px;letter-spacing:1px;border-radius:9px}
-  .buy-btn.act{background:linear-gradient(180deg,#3ee08a,#1a9d5a);color:#04140c;border-color:var(--green);box-shadow:0 0 16px rgba(62,224,138,.3)}
-  .sell-btn.act{background:linear-gradient(180deg,#ff5265,#a81f2e);color:#fff;border-color:var(--red);box-shadow:0 0 16px rgba(255,82,101,.3)}
-
+  .side-btns{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px}
+  .side-btns button{padding:12px;font-weight:700;font-size:12px;border-radius:7px;letter-spacing:.3px}
+  .buy-btn.act{background:var(--green);color:#fff;border-color:var(--green)}
+  .sell-btn.act{background:var(--red);color:#fff;border-color:var(--red)}
   .fld{margin-bottom:11px}
-  .fld label{display:block;font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:5px;letter-spacing:1px;text-transform:uppercase}
+  .fld label{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;font-weight:600}
   .fld input,.fld select{width:100%}
-  .submit{width:100%;padding:14px;font-family:var(--disp);font-weight:900;font-size:13px;letter-spacing:2px;border-radius:10px;margin-top:4px;
-    background:linear-gradient(180deg,var(--gold-hi),var(--gold) 55%,var(--bronze));color:#1a1408;border:0;
-    box-shadow:0 0 20px rgba(212,175,55,.3)}
-  .submit:hover{box-shadow:0 0 30px rgba(212,175,55,.5);color:#1a1408}
-  .submit.sell{background:linear-gradient(180deg,#ff5265,#a81f2e);color:#fff}
-
-  .tabs{display:flex;gap:4px;margin-bottom:14px;background:var(--void);border-radius:9px;padding:3px;border:1px solid var(--edge)}
-  .tabs button{flex:1;padding:8px;font-family:var(--disp);font-size:10px;letter-spacing:1px;border:0;border-radius:6px;background:transparent;color:var(--dim)}
-  .tabs button.act{background:linear-gradient(180deg,var(--gold-dim),var(--bronze));color:var(--gold-hi)}
-
-  table{width:100%;border-collapse:collapse;font-size:12px}
-  th,td{text-align:left;padding:8px 5px;border-bottom:1px solid var(--edge);font-family:var(--mono);font-variant-numeric:tabular-nums}
-  th{color:var(--gold-dim);font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:1px}
-
-  /* telemetry log */
-  .telem{font-family:var(--mono);font-size:11px;line-height:1.75;color:var(--dim);max-height:200px;overflow:auto;
-    background:var(--void);border:1px solid var(--edge);border-radius:10px;padding:12px}
-  .telem::before{content:'▸ TELEMETRY FEED';display:block;color:var(--gold-dim);font-size:8px;letter-spacing:2px;margin-bottom:8px}
-
-  .warn{background:linear-gradient(90deg,rgba(212,175,55,.08),transparent);border:1px solid var(--gold-dim);
-    border-radius:10px;padding:11px 16px;font-size:12px;color:var(--gold);letter-spacing:.3px;margin-bottom:20px}
-  .stat-big{font-family:var(--disp);font-weight:900;font-size:26px;letter-spacing:1px}
+  .submit{width:100%;padding:13px;background:var(--navy);color:#fff;border:0;border-radius:7px;font-weight:700;font-size:13px;letter-spacing:.5px}
+  .submit:hover{background:var(--navy2)}
+  .submit.sell{background:var(--red)}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .liq{display:flex;height:7px;border-radius:5px;overflow:hidden;margin-top:10px;background:var(--void);gap:2px}
+
+  .tabs{display:flex;gap:4px;margin-bottom:13px;background:#eef1f5;border-radius:8px;padding:3px}
+  .tabs button{flex:1;padding:8px;font-size:11px;font-weight:600;border:0;border-radius:6px;background:transparent;color:var(--muted)}
+  .tabs button.act{background:#fff;color:var(--navy);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:7px 5px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  th{color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.4px}
+
+  .log{font-family:'Consolas','Monaco',monospace;font-size:11px;line-height:1.8;color:var(--muted);background:#f8fafc;border:1px solid var(--line);border-radius:7px;padding:11px;max-height:180px;overflow:auto}
+  .liq{display:flex;height:7px;border-radius:5px;overflow:hidden;margin-top:9px;background:#eef1f5;gap:2px}
   .liq .l{background:var(--green)} .liq .s{background:var(--red)}
-  .price-hero .big{font-family:var(--disp);font-weight:700;font-size:26px;letter-spacing:1px}
-  .price-sub{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:1px;margin-top:3px;text-transform:uppercase}
+  .perf-net{font-size:24px;font-weight:800}
+  .warn{background:#fff8ea;border:1px solid #f0dfb8;color:#8a6d1e;border-radius:8px;padding:10px 15px;font-size:12px;margin-bottom:18px}
   .hidden{display:none !important}
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div class="brand">◆ AURUM <span class="v">CORE v24</span></div>
-  <span class="dot" id="wsdot"></span><span class="dim mono" id="wstxt" style="font-size:11px">connecting…</span>
-  <select id="symbol" style="max-width:150px"></select>
+<div class="hdr">
+  <div class="logo"><span class="mark">◆</span> Somu Trader</div>
+  <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
-  <span style="margin-left:auto" class="dim mono" id="clock" style="font-size:11px"></span>
-</div>
-
-<div style="max-width:1440px;margin:0 auto;padding:20px 20px 0">
-  <div class="warn">◆ COMMAND DECK — Market data is live. Orders route through your signed proxy. Auto-pilot is testnet-locked until proven profitable.</div>
-</div>
-
-<!-- proxy connection strip -->
-<div style="max-width:1440px;margin:0 auto;padding:0 20px">
-  <div class="hud" style="margin-bottom:20px">
-    <h2>Uplink <span class="eyebrow">proxy connection</span></h2>
-    <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:11px">
-      <button id="envLive" onclick="setEnv('live')" class="pill-env">◉ LIVE</button>
-      <button id="envTest" onclick="setEnv('testnet')" class="pill-env">◎ TESTNET</button>
-      <span id="envLabel" class="mono" style="font-size:12px;color:var(--gold)"></span>
-    </div>
-    <div style="display:flex;gap:9px;flex-wrap:wrap">
-      <input id="cfgUrl" placeholder="proxy endpoint url" style="flex:2;min-width:220px">
-      <input id="cfgTok" placeholder="access token" style="flex:1;min-width:130px">
-      <button onclick="saveCfg()" id="saveCfgBtn" class="submit" style="width:auto;padding:10px 24px;margin:0">CONNECT</button>
-    </div>
-    <div id="cfgMsg" class="mono" style="font-size:11px;margin-top:9px;color:var(--dim)"></div>
+  <select id="symbol"></select>
+  <div class="right">
+    <span class="dot" id="wsdot"></span><span id="wstxt" class="num">connecting…</span>
+    <span id="clock" class="num"></span>
   </div>
 </div>
 
-<div class="deck">
-  <!-- LEFT: market telemetry -->
-  <div class="stack">
-    <div class="hud">
-      <h2>Target <span class="eyebrow">market feed</span></h2>
-      <div class="price-hero">
-        <div class="big mono" id="mark">—</div>
-        <div class="price-sub" id="markSub">mark price</div>
+<div class="wrap">
+  <div class="warn">Market data is live. Orders route through your signed proxy. Auto-pilot is testnet-locked until proven profitable.</div>
+
+  <!-- uplink -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-h"><span class="l"><span class="mk"></span>Proxy Connection</span></div>
+    <div class="card-b">
+      <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:11px">
+        <button id="envLive" onclick="setEnv('live')" class="pill-env" style="padding:7px 16px">LIVE</button>
+        <button id="envTest" onclick="setEnv('testnet')" class="pill-env" style="padding:7px 16px">TESTNET</button>
+        <span id="envLabel" class="num" style="font-size:12px;color:var(--amber);font-weight:600"></span>
       </div>
-      <div class="kv"><span class="lbl">24h change</span><span class="v" id="chg">—</span></div>
-      <div class="kv"><span class="lbl">24h high</span><span class="v" id="hi">—</span></div>
-      <div class="kv"><span class="lbl">24h low</span><span class="v" id="lo">—</span></div>
-      <div class="kv"><span class="lbl">24h volume</span><span class="v" id="vol">—</span></div>
-    </div>
-    <div class="hud">
-      <h2>Derivatives</h2>
-      <div class="kv"><span class="lbl">Open interest</span><span class="v" id="oi">—</span></div>
-      <div class="kv"><span class="lbl">Funding rate</span><span class="v" id="funding">—</span></div>
-      <div class="kv"><span class="lbl">Mark vs spot</span><span class="v" id="basis">—</span></div>
-      <div class="kv"><span class="lbl">Index price</span><span class="v" id="spot">—</span></div>
-    </div>
-    <div class="hud">
-      <h2>Liquidity</h2>
-      <div class="kv"><span class="lbl">Bid depth</span><span class="v g" id="bidDepth">—</span></div>
-      <div class="kv"><span class="lbl">Ask depth</span><span class="v r" id="askDepth">—</span></div>
-      <div class="kv"><span class="lbl">Imbalance</span><span class="v" id="imb">—</span></div>
-      <div class="liq" id="liqBar"><div class="l" style="width:50%"></div><div class="s" style="width:50%"></div></div>
-    </div>
-    <!-- hidden orderbook feeds engine -->
-    <div class="hidden">
-      <div id="asks"></div><div id="spread"></div><div id="bids"></div>
+      <div style="display:flex;gap:9px;flex-wrap:wrap">
+        <input id="cfgUrl" placeholder="proxy endpoint URL" style="flex:2;min-width:220px">
+        <input id="cfgTok" placeholder="access token" style="flex:1;min-width:130px">
+        <button onclick="saveCfg()" id="saveCfgBtn" class="submit" style="width:auto;padding:9px 22px">Connect</button>
+      </div>
+      <div id="cfgMsg" class="num" style="font-size:12px;margin-top:9px;color:var(--muted)"></div>
     </div>
   </div>
 
-  <!-- CENTER: THE CORE -->
-  <div class="stack">
-    <div class="hud" style="padding:22px">
-      <div class="core-wrap">
-        <div class="core">
-          <div class="ring r1 spin"></div>
-          <div class="ring r2 spin-rev"></div>
-          <div class="ring r3 spin"></div>
-          <div class="core-orb" id="coreOrb">
-            <div class="core-state" id="coreState">OFFLINE</div>
-            <div class="core-sub" id="coreSub">core dormant</div>
+  <div class="grid">
+    <!-- LEFT -->
+    <div class="col">
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Market</span></div>
+        <div class="card-b">
+          <div class="price" id="mark">—</div>
+          <div class="price-sub" id="markSub">mark price</div>
+          <div style="margin-top:12px">
+            <div class="kv"><span class="lbl">24h change</span><span class="v" id="chg">—</span></div>
+            <div class="kv"><span class="lbl">24h high</span><span class="v" id="hi">—</span></div>
+            <div class="kv"><span class="lbl">24h low</span><span class="v" id="lo">—</span></div>
+            <div class="kv"><span class="lbl">24h volume</span><span class="v" id="vol">—</span></div>
           </div>
         </div>
-        <div class="core-readout" id="coreReadout">Engage the engine to begin market analysis</div>
-        <div class="core-score" id="sigScore" style="color:var(--gold)">SCORE 0.00</div>
-        <!-- hidden legacy signal els the engine writes to -->
-        <span class="hidden" id="sigDir"></span><span class="hidden" id="sigMeter"></span>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Derivatives</span></div>
+        <div class="card-b">
+          <div class="kv"><span class="lbl">Open interest</span><span class="v" id="oi">—</span></div>
+          <div class="kv"><span class="lbl">Funding rate</span><span class="v" id="funding">—</span></div>
+          <div class="kv"><span class="lbl">Mark vs spot</span><span class="v" id="basis">—</span></div>
+          <div class="kv"><span class="lbl">Index price</span><span class="v" id="spot">—</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Liquidity</span></div>
+        <div class="card-b">
+          <div class="kv"><span class="lbl">Bid depth</span><span class="v g" id="bidDepth">—</span></div>
+          <div class="kv"><span class="lbl">Ask depth</span><span class="v r" id="askDepth">—</span></div>
+          <div class="kv"><span class="lbl">Imbalance</span><span class="v" id="imb">—</span></div>
+          <div class="liq" id="liqBar"><div class="l" style="width:50%"></div><div class="s" style="width:50%"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Market Scanner</span>
+          <span style="display:flex;gap:6px;align-items:center">
+            <select id="scanCount" style="font-size:10px;padding:3px 6px" onchange="if(lastScan.length)renderScan(lastScan.slice(0,+this.value))">
+              <option value="5">Top 5</option><option value="10">Top 10</option><option value="20">Top 20</option>
+            </select>
+            <button onclick="runScan()" id="scanBtn" style="font-size:10px;padding:5px 11px;font-weight:600">Scan</button>
+          </span>
+        </div>
+        <div class="card-b">
+          <div style="position:relative;margin-bottom:11px">
+            <input id="coinSearch" placeholder="Search any coin — BTC, SOL…" autocomplete="off" style="width:100%">
+            <div id="searchResults" class="hidden" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 14px rgba(26,43,74,.12);max-height:240px;overflow:auto;z-index:50;margin-top:4px"></div>
+          </div>
+          <div id="scanInfo" class="num" style="font-size:10px;color:var(--muted);margin-bottom:9px"></div>
+          <div id="scanList"><div class="dim" style="font-size:12px">Tap Scan to find trending coins.</div></div>
+          <label style="display:flex;align-items:center;gap:7px;font-size:11px;margin-top:10px;color:var(--muted)">
+            <input type="checkbox" id="autoScan" style="width:auto"> Auto-refresh every 30s</label>
+        </div>
+      </div>
+    </div>
 
-        <div class="sig-bars">
-          <div class="sig-cell"><div class="lbl">OB imbal</div><div class="val mono" id="sOb">—</div></div>
-          <div class="sig-cell"><div class="lbl">Momentum</div><div class="val mono" id="sMom">—</div></div>
-          <div class="sig-cell"><div class="lbl">OI trend</div><div class="val mono" id="sOi">—</div></div>
-          <div class="sig-cell"><div class="lbl">Funding</div><div class="val mono" id="sFund">—</div></div>
+    <!-- CENTER: robot -->
+    <div class="col">
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>AI Trading Robot</span></div>
+        <div class="card-b">
+          <div id="robotStatus" class="robot-status">
+            <div class="st" id="rsStateWrap"><span id="rsLight" style="width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block"></span><span id="rsState">Robot Off</span></div>
+            <div class="dt" id="rsDetail">Turn on the engine, then auto-pilot to arm the robot.</div>
+          </div>
+          <div class="gauge">
+            <div class="dir-big" id="sigDir" style="color:var(--muted)">NEUTRAL</div>
+            <div class="score" id="sigScore">Signal score 0.00</div>
+            <div class="sig-bars">
+              <div class="sig-cell"><div class="lbl">OB imbal</div><div class="val" id="sOb">—</div></div>
+              <div class="sig-cell"><div class="lbl">Momentum</div><div class="val" id="sMom">—</div></div>
+              <div class="sig-cell"><div class="lbl">OI trend</div><div class="val" id="sOi">—</div></div>
+              <div class="sig-cell"><div class="lbl">Funding</div><div class="val" id="sFund">—</div></div>
+            </div>
+          </div>
+          <div class="toggle-row"><label>Engine</label><div class="sw" id="tglEngine" onclick="toggleSwitch('sigOn',this)"></div></div>
+          <div class="toggle-row"><label>Auto-Pilot</label><div class="sw" id="tglAuto" onclick="toggleSwitch('autoExec',this)"></div></div>
+          <div class="toggle-row"><label>Trailing Profit-Lock</label><div class="sw" id="tglTrail" onclick="toggleSwitch('trailOn',this)"></div></div>
+          <input type="checkbox" id="sigOn" class="hidden"><input type="checkbox" id="autoExec" class="hidden"><input type="checkbox" id="trailOn" class="hidden">
+          <div id="autoExecMsg" class="hidden"></div>
         </div>
       </div>
 
-      <!-- core controls -->
-      <div style="margin-top:20px">
-        <div class="switch">
-          <label>◇ Engine</label>
-          <div class="toggle" id="tglEngine" onclick="toggleSwitch('sigOn',this)"></div>
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Auto-Pilot Settings</span></div>
+        <div class="card-b">
+          <div class="fld"><label>Position sizing</label>
+            <select id="sizeMode"><option value="pct">% of balance (auto lots)</option><option value="fixed">Fixed contracts</option></select></div>
+          <div class="row2">
+            <div class="fld"><label id="sizeLbl">Balance % per trade</label><input id="botPct" type="number" step="1" value="10"></div>
+            <div class="fld"><label>Min strength</label><input id="botScore" type="number" step="0.05" value="0.30"></div>
+          </div>
+          <div class="row2">
+            <div class="fld"><label>Cooldown (min)</label><input id="botCooldown" type="number" step="1" value="3"></div>
+            <div class="fld"><label>Trail step %</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
+          </div>
+          <input id="botSize" type="hidden" value="1">
+          <div id="sizeCalc" class="num" style="font-size:10px;color:var(--muted)"></div>
         </div>
-        <div class="switch">
-          <label>◈ Auto-Pilot</label>
-          <div class="toggle grn" id="tglAuto" onclick="toggleSwitch('autoExec',this)"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Performance</span></div>
+        <div class="card-b">
+          <div id="robotStats"><span class="dim" style="font-size:12px">No completed auto trades yet.</span></div>
         </div>
-        <!-- hidden real checkboxes the engine reads -->
-        <input type="checkbox" id="sigOn" class="hidden"><input type="checkbox" id="autoExec" class="hidden">
-        <div id="autoExecMsg" class="hidden"></div>
       </div>
 
-      <!-- core status detail -->
-      <div id="robotStatus" style="border-radius:12px;padding:14px;margin-top:16px;background:var(--void);border:1px solid var(--edge)">
-        <div style="display:flex;align-items:center;gap:9px">
-          <span id="rsLight" style="width:9px;height:9px;border-radius:50%;background:var(--dim);display:inline-block"></span>
-          <span id="rsState" style="font-family:var(--disp);font-weight:700;font-size:13px;letter-spacing:1px">CORE OFFLINE</span>
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Telemetry</span>
+          <span class="dim" style="font-weight:400;font-size:10px">journal: <span id="jCount">0</span></span></div>
+        <div class="card-b">
+          <div class="log" id="autolog">robot idle…</div>
+          <button onclick="exportJournal()" style="width:100%;margin-top:10px;font-size:11px">Export Journal CSV</button>
         </div>
-        <div id="rsDetail" style="font-size:12px;color:var(--dim);margin-top:8px;line-height:1.6">Engage the engine, then auto-pilot to arm the core.</div>
       </div>
     </div>
 
-    <!-- SCANNER radar -->
-    <div class="hud">
-      <h2>Radar <span style="display:flex;gap:7px;align-items:center">
-        <select id="scanCount" style="font-size:10px;padding:4px 7px" onchange="if(lastScan.length)renderScan(lastScan.slice(0,+this.value))">
-          <option value="5">TOP 5</option><option value="10">TOP 10</option><option value="20">TOP 20</option>
-        </select>
-        <button onclick="runScan()" id="scanBtn" style="font-size:10px;padding:6px 12px;letter-spacing:1px">◈ SCAN</button>
-      </span></h2>
-      <div style="position:relative;margin-bottom:12px">
-        <input id="coinSearch" placeholder="⌕ search any coin — BTC, SOL, ETH…" autocomplete="off" style="width:100%">
-        <div id="searchResults" class="hidden" style="position:absolute;top:100%;left:0;right:0;background:var(--panel);border:1px solid var(--edge);border-radius:10px;max-height:260px;overflow:auto;z-index:50;margin-top:4px"></div>
-      </div>
-      <div id="scanInfo" class="mono" style="font-size:9px;color:var(--dim);margin-bottom:10px;letter-spacing:1px"></div>
-      <div id="scanList"><div class="dim" style="font-size:12px">Hit SCAN to sweep the market for the strongest setups.</div></div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin-top:12px;color:var(--dim)">
-        <input type="checkbox" id="autoScan" style="width:auto"> Auto-sweep every 30s</label>
-    </div>
-
-    <!-- telemetry -->
-    <div class="hud">
-      <h2>Journal <span class="eyebrow">outcome +60s · <span id="jCount">0</span> logged</span></h2>
-      <div class="telem" id="autolog">core idle…</div>
-      <button onclick="exportJournal()" style="width:100%;margin-top:10px;font-size:11px;letter-spacing:1px">⬇ EXPORT JOURNAL CSV</button>
-    </div>
-  </div>
-
-  <!-- RIGHT: controls -->
-  <div class="stack">
-    <!-- performance -->
-    <div class="hud">
-      <h2>Performance <span class="eyebrow">session</span></h2>
-      <div id="robotStats"><span class="dim" style="font-size:12px">No completed auto trades yet.</span></div>
-    </div>
-
-    <!-- auto-pilot config -->
-    <div class="hud">
-      <h2>Auto-Pilot Config</h2>
-      <div class="fld"><label>Position sizing</label>
-        <select id="sizeMode" style="padding:8px"><option value="pct">% of balance (auto lots)</option><option value="fixed">Fixed contracts</option></select>
-      </div>
-      <div class="row2">
-        <div class="fld"><label id="sizeLbl">Balance % / trade</label><input id="botPct" type="number" step="1" value="10"></div>
-        <div class="fld"><label>Min strength</label><input id="botScore" type="number" step="0.05" value="0.30"></div>
-      </div>
-      <div class="fld"><label>Cooldown (minutes)</label><input id="botCooldown" type="number" step="1" value="3"></div>
-      <div style="border-top:1px solid var(--edge);margin:12px 0 10px;padding-top:12px">
-        <div class="switch" style="border:0;padding:0 0 8px">
-          <label style="font-size:11px">⤴ Trailing profit-lock</label>
-          <div class="toggle" id="tglTrail" onclick="toggleSwitch('trailOn',this)"></div>
+    <!-- RIGHT -->
+    <div class="col">
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Manual Trade</span></div>
+        <div class="card-b">
+          <div class="side-btns">
+            <button class="buy-btn act" id="bBuy" onclick="setSide('buy')">BUY / LONG</button>
+            <button class="sell-btn" id="bSell" onclick="setSide('sell')">SELL / SHORT</button>
+          </div>
+          <div class="fld"><label>Order type</label>
+            <select id="otype" onchange="onType()"><option value="market_order">Market</option><option value="limit_order">Limit</option></select></div>
+          <div class="fld hidden" id="priceFld"><label>Limit price</label><input id="price" type="number" step="any"></div>
+          <div class="row2">
+            <div class="fld"><label>Size</label><input id="size" type="number" step="1" value="1"></div>
+            <div class="fld"><label>Leverage</label><input id="lev" type="number" step="1" value="10"></div>
+          </div>
+          <div class="row2">
+            <div class="fld"><label>Stop-loss %</label><input id="slPct" type="number" step="0.1" value="0.3"></div>
+            <div class="fld"><label>Take-profit %</label><input id="tpPct" type="number" step="0.1" value="0.6"></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:7px;font-size:12px;margin-bottom:10px">
+            <input type="checkbox" id="useBracket" checked style="width:auto"> Attach bracket SL/TP</label>
+          <div class="num dim" style="font-size:11px;margin-bottom:10px" id="sltpPreview">SL/TP: —</div>
+          <button class="submit buy" id="submitBtn" onclick="placeOrder()">Execute Buy Order</button>
+          <div class="num dim" style="margin-top:8px;font-size:10px" id="notional">Notional: —</div>
         </div>
-        <input type="checkbox" id="trailOn" class="hidden">
-        <div class="fld" style="margin:0"><label>Step size % (SL climbs, TP extends each step)</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
-        <div style="font-size:10px;color:var(--dim);margin-top:6px;line-height:1.5">Each time price advances one step your way, the stop jumps up to lock profit and the target pushes further out. The trade rides the move and exits on the trailing stop.</div>
       </div>
-      <input id="botSize" type="hidden" value="1">
-      <div id="sizeCalc" class="mono" style="font-size:10px;color:var(--dim);margin-top:2px"></div>
-    </div>
 
-    <!-- manual trade -->
-    <div class="hud">
-      <h2>Manual Override</h2>
-      <div class="side-btns">
-        <button class="buy-btn act" id="bBuy" onclick="setSide('buy')">▲ BUY / LONG</button>
-        <button class="sell-btn" id="bSell" onclick="setSide('sell')">▼ SELL / SHORT</button>
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Risk Guard</span></div>
+        <div class="card-b">
+          <div class="row2">
+            <div class="fld"><label>Daily loss limit</label><input id="dailyLimit" type="number" step="any" placeholder="2000"></div>
+            <div class="fld"><label>Live PnL</label><input id="todayPnl" type="number" step="any" value="0" readonly style="background:#eef1f5"></div>
+          </div>
+          <div id="guardMsg" style="font-size:11px;color:var(--muted)">Blocks new entries past the loss limit. Open positions untouched.</div>
+        </div>
       </div>
-      <div class="fld"><label>Order type</label>
-        <select id="otype" onchange="onType()"><option value="market_order">Market</option><option value="limit_order">Limit</option></select>
-      </div>
-      <div class="fld hidden" id="priceFld"><label>Limit price</label><input id="price" type="number" step="any"></div>
-      <div class="row2">
-        <div class="fld"><label>Size</label><input id="size" type="number" step="1" value="1"></div>
-        <div class="fld"><label>Leverage</label><input id="lev" type="number" step="1" value="10"></div>
-      </div>
-      <div class="row2">
-        <div class="fld"><label>Stop-loss %</label><input id="slPct" type="number" step="0.1" value="0.3"></div>
-        <div class="fld"><label>Take-profit %</label><input id="tpPct" type="number" step="0.1" value="0.6"></div>
-      </div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:10px">
-        <input type="checkbox" id="useBracket" checked style="width:auto"> Attach bracket SL/TP</label>
-      <div class="mono dim" style="font-size:11px;margin-bottom:10px" id="sltpPreview">SL/TP: —</div>
-      <button class="submit buy" id="submitBtn" onclick="placeOrder()">EXECUTE BUY</button>
-      <div class="mono dim" style="margin-top:8px;font-size:10px" id="notional">Notional: —</div>
-    </div>
 
-    <!-- risk guard -->
-    <div class="hud">
-      <h2>Risk Guard</h2>
-      <div class="row2">
-        <div class="fld"><label>Daily loss limit</label><input id="dailyLimit" type="number" step="any" placeholder="2000"></div>
-        <div class="fld"><label>Live PnL</label><input id="todayPnl" type="number" step="any" value="0" readonly style="background:var(--void)"></div>
+      <div class="card">
+        <div class="card-h"><span class="l"><span class="mk"></span>Account</span>
+          <span class="dim" style="font-weight:400;font-size:10px;display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span>live</span></div>
+        <div class="card-b">
+          <div class="tabs">
+            <button class="act" onclick="posTab('pos',this)">Positions</button>
+            <button onclick="posTab('ord',this)">Orders</button>
+            <button onclick="posTab('bal',this)">Balance</button>
+          </div>
+          <div id="posBox"><div class="dim" style="font-size:12px">Connect proxy to load account data.</div></div>
+        </div>
       </div>
-      <div id="guardMsg" style="font-size:10px;color:var(--dim)">Arms a kill-switch that blocks new entries past the loss limit. Open positions untouched.</div>
-    </div>
 
-    <!-- account -->
-    <div class="hud">
-      <h2>Account <span class="eyebrow"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span> live</span></h2>
-      <div class="tabs">
-        <button class="act" onclick="posTab('pos',this)">POSITIONS</button>
-        <button onclick="posTab('ord',this)">ORDERS</button>
-        <button onclick="posTab('bal',this)">BALANCE</button>
-      </div>
-      <div id="posBox"><div class="dim" style="font-size:12px">Connect uplink to load account data.</div></div>
+      <!-- hidden orderbook feeds the engine -->
+      <div class="hidden"><div id="asks"></div><div id="spread"></div><div id="bids"></div></div>
     </div>
   </div>
 </div>
 
 <script>
+/* ===== UI BRIDGE ===== */
+function toggleSwitch(cbId,el){
+  const cb=document.getElementById(cbId);cb.checked=!cb.checked;
+  el.classList.toggle('on',cb.checked);cb.dispatchEvent(new Event('change'));
+}
+function syncToggles(){
+  [['sigOn','tglEngine'],['autoExec','tglAuto'],['trailOn','tglTrail']].forEach(([c,t])=>{
+    const cb=document.getElementById(c),tg=document.getElementById(t);
+    if(cb&&tg)tg.classList.toggle('on',cb.checked);
+  });
+}
 /* ===== UI BRIDGE: new sci-fi shell → existing engine ===== */
 function toggleSwitch(checkboxId, el){
   const cb=document.getElementById(checkboxId);
@@ -393,45 +341,7 @@ function toggleSwitch(checkboxId, el){
   cb.dispatchEvent(new Event('change'));
 }
 // keep toggles visually synced if engine flips a checkbox
-function syncToggles(){
-  const e=document.getElementById('sigOn'), a=document.getElementById('autoExec');
-  const te=document.getElementById('tglEngine'), ta=document.getElementById('tglAuto');
-  if(te)te.classList.toggle('on',e?.checked);
-  if(ta)ta.classList.toggle('on',a?.checked);
-}
-// paint the central Core orb from current robot state
-function renderCore(){
-  const orb=document.getElementById('coreOrb'), st=document.getElementById('coreState'),
-        sub=document.getElementById('coreSub'), read=document.getElementById('coreReadout');
-  if(!orb)return;
-  const engineOn=document.getElementById('sigOn')?.checked;
-  const autoOn=document.getElementById('autoExec')?.checked;
-  orb.className='core-orb';  // reset
-  if(!engineOn){
-    st.textContent='OFFLINE'; sub.textContent='core dormant';
-    read.textContent='Engage the engine to begin market analysis'; return;
-  }
-  if(typeof robotOpenTrade!=='undefined' && robotOpenTrade){
-    orb.classList.add('locked');
-    st.innerHTML='<span class="core-coin">'+(robotOpenTrade.sym||'—')+'</span>';
-    sub.textContent=robotOpenTrade.side.toUpperCase()+' · in trade';
-    read.textContent='Position live — holding until SL/TP resolves';
-    return;
-  }
-  if(autoOn && (typeof ENV==='undefined'||ENV==='testnet')){
-    orb.classList.add('scanning');
-    st.textContent='HUNTING'; sub.textContent='seeking target';
-    read.textContent='Auto-pilot armed — sweeping market for strongest setup';
-  }else if(autoOn){
-    orb.classList.add('blocked');
-    st.textContent='LOCKED'; sub.textContent='live mode';
-    read.textContent='Auto-pilot disabled on LIVE — switch to TESTNET';
-  }else{
-    orb.classList.add('scanning');
-    st.textContent='WATCHING'; sub.textContent='analysis only';
-    read.textContent='Engine analyzing — arm auto-pilot to let the core trade';
-  }
-}
+function renderCore(){ /* no core orb in this theme — status shown via updateRobotStatus */ }
 /* ================= CONFIG / STATE ================= */
 const PUB = 'https://api.india.delta.exchange';   // public market data (no auth)
 let PROXY = localStorage.getItem('dx_proxy') || '';
@@ -600,8 +510,8 @@ function setEnv(e){
 function refreshEnvUI(){
   const live=ENV==='live';
   const lb=$('envLive'), tb=$('envTest');
-  if(lb){lb.style.background=live?'var(--red)':'var(--panel2)';lb.style.color=live?'#fff':'var(--dim)';}
-  if(tb){tb.style.background=!live?'var(--green)':'var(--panel2)';tb.style.color=!live?'#fff':'var(--dim)';}
+  if(lb){lb.style.background=live?'var(--red)':'#eef1f5';lb.style.color=live?'#fff':'var(--muted)';}
+  if(tb){tb.style.background=!live?'var(--green)':'#eef1f5';tb.style.color=!live?'#fff':'var(--muted)';}
   const el=$('envLabel'); if(el)el.textContent=live?'⚠ real money':'✓ fake money — safe to test';
   const pill=$('envPill');
   if(pill){pill.textContent=live?'LIVE':'TESTNET';pill.style.color='#fff';pill.style.background=live?'var(--red)':'var(--green)';}
@@ -842,7 +752,7 @@ function renderScan(list){
   if(!list.length){$('scanList').innerHTML='<div class="dim">No results.</div>';return;}
   $('scanList').innerHTML=list.map((c,i)=>{
     const dcol=c.dir==='LONG'?'var(--green)':c.dir==='SHORT'?'var(--red)':'var(--dim)';
-    const dbg=c.dir==='LONG'?'var(--green-bg)':c.dir==='SHORT'?'var(--red-bg)':'var(--panel2)';
+    const dbg=c.dir==='LONG'?'var(--green-bg)':c.dir==='SHORT'?'var(--red-bg)':'#eef1f5';
     const sel=(cur&&cur.symbol===c.sym)?' sel':'';
     return `<div class="scan-row${sel}" onclick="pickScan('${c.sym}')">
       <span class="scan-rank">${i+1}</span>
@@ -926,10 +836,10 @@ function runSignal(imb){
   $('sFund').textContent=(fr*100).toFixed(4)+'%'; $('sFund').className='v '+(fr<=0?'g':'r');
 
   const dir = score>0.35?'LONG' : score<-0.35?'SHORT' : 'NEUTRAL';
-  const col = dir==='LONG'?'var(--green)':dir==='SHORT'?'var(--red)':'var(--dim)';
+  const col = dir==='LONG'?'var(--green)':dir==='SHORT'?'var(--red)':'var(--muted)';
   $('sigDir').textContent=dir; $('sigDir').style.color=col;
   const ss=$('sigScore');
-  if(ss){ss.textContent=dir+' · '+(score>=0?'+':'')+score.toFixed(2);ss.style.color=col;}
+  if(ss){ss.textContent='Signal score '+(score>=0?'+':'')+score.toFixed(2);}
 
   if(!$('sigOn')?.checked) return;
 
@@ -1015,30 +925,30 @@ function updateRobotStatus(){
   const size=$('botSize')?.value||1, minS=$('botScore')?.value||0.45;
 
   if(!engineOn){
-    light.style.background='var(--dim)';
-    state.textContent='ROBOT OFF';state.style.color='var(--txt)';
-    box.style.borderColor='var(--line)';box.style.background='var(--panel2)';
-    detail.innerHTML='Engine is off. Tick <b>Engine on</b> to start watching the market.';
+    light.style.background='var(--muted)';
+    state.textContent='Robot Off';state.style.color='var(--txt)';
+    box.style.borderLeftColor='var(--muted)';box.style.background='#f8fafc';
+    detail.innerHTML='Engine is off. Turn on <b>Engine</b> to start watching the market.';
     return;
   }
   if(engineOn && !autoOn){
     light.style.background='var(--amber)';
-    state.textContent='WATCHING (no trades)';state.style.color='var(--amber)';
-    box.style.borderColor='#ffe4a3';box.style.background='#fff8e6';
-    detail.innerHTML='Engine is scanning &amp; logging signals but <b>will not place orders</b>. Tick auto-execute to arm.';
+    state.textContent='Watching (no trades)';state.style.color='var(--amber)';
+    box.style.borderLeftColor='var(--amber)';box.style.background='#fff8ea';
+    detail.innerHTML='Engine is scanning &amp; logging signals but <b>will not place orders</b>. Turn on Auto-Pilot to arm.';
     return;
   }
   if(ENV!=='testnet'){
     light.style.background='var(--red)';
-    state.textContent='BLOCKED (live mode)';state.style.color='var(--red)';
-    box.style.borderColor='var(--red)';box.style.background='var(--red-bg)';
-    detail.innerHTML='Auto-execute is locked on LIVE. Switch to <b>TESTNET</b> to let the robot trade.';
+    state.textContent='Blocked (live mode)';state.style.color='var(--red)';
+    box.style.borderLeftColor='var(--red)';box.style.background='var(--red-bg)';
+    detail.innerHTML='Auto-Pilot is locked on LIVE. Switch to <b>TESTNET</b> to let the robot trade.';
     return;
   }
   light.style.background='var(--green)';
-  state.textContent = robotOpenTrade ? '● IN TRADE' : '✓ ARMED — AUTO-PICKING';
+  state.textContent = robotOpenTrade ? '● In Trade' : '✓ Armed — Auto-Picking';
   state.style.color='var(--green)';
-  box.style.borderColor='var(--green)';box.style.background='var(--green-bg)';
+  box.style.borderLeftColor='var(--green)';box.style.background='var(--green-bg)';
   if(robotOpenTrade){
     const t=robotOpenTrade;
     let trailTxt='';
