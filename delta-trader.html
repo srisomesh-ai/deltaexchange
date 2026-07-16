@@ -130,7 +130,7 @@
 <body>
 
 <div class="bar">
-  <h1>🌱 Delta Trader <span class="v">v17</span></h1>
+  <h1>🌱 Delta Trader <span class="v">v18</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:12px">connecting…</span>
   <select id="symbol"></select>
   <span id="envPill" class="pill-env"></span>
@@ -212,17 +212,16 @@
         <input type="checkbox" id="autoScan" style="width:auto"> Auto-refresh scan every 30s</label>
     </div>
 
-    <div class="card ob-card">
-      <h2>Order Book <span class="dim" style="font-weight:500">live</span></h2>
+    <!-- Order book hidden (robot mode) but kept live for the signal engine -->
+    <div class="ob-card" style="display:none">
       <div class="ob-wrap">
-        <div class="ob-head"><span>Price (USD)</span><span>Size</span></div>
         <div class="ob" id="asks"></div>
         <div class="spread" id="spread">—</div>
         <div class="ob" id="bids"></div>
       </div>
     </div>
     <div class="card">
-      <h2>Positions &amp; Orders</h2>
+      <h2>Positions &amp; Orders <span class="dim" style="font-weight:500;display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span>live</span></h2>
       <div class="tabs">
         <button class="act" onclick="posTab('pos',this)">Positions</button>
         <button onclick="posTab('ord',this)">Open Orders</button>
@@ -331,6 +330,7 @@ const PUB = 'https://api.india.delta.exchange';   // public market data (no auth
 let PROXY = localStorage.getItem('dx_proxy') || '';
 let PTOKEN = localStorage.getItem('dx_token') || '';
 let ENV = localStorage.getItem('dx_env') || 'live';   // 'live' or 'testnet'
+let curTab='pos';
 let products = [];      // perpetual futures
 let cur = null;         // current product object
 let side = 'buy';
@@ -449,7 +449,16 @@ function updateNotional(){
   $('notional').textContent='Notional ≈ '+fmt(notional,2)+'  ('+cur.settling_asset?.symbol||'USDT'+')';
 }
 
-function refreshAll(){loadTicker();loadBook();updateSLTPPreview();}
+function refreshAll(){
+  loadTicker();loadBook();updateSLTPPreview();
+  // live-refresh whichever account tab is showing (if proxy connected)
+  if(PROXY){
+    if(curTab==='pos')loadPositions();
+    else if(curTab==='ord')loadOrders();
+    else if(curTab==='bal')loadBalance();
+  }
+  if(typeof updateRobotStatus==='function')updateRobotStatus();
+}
 setInterval(refreshAll,3000);
 
 /* ================= UI ================= */
@@ -518,7 +527,6 @@ async function proxy(method,path,{query='',body=null}={}){
 }
 
 /* ================= ACCOUNT ================= */
-let curTab='pos';
 function posTab(t,btn){curTab=t;[...document.querySelectorAll('.tabs button')].forEach(b=>b.classList.remove('act'));btn.classList.add('act');
   if(t==='pos')loadPositions();else if(t==='ord')loadOrders();else loadBalance();}
 
