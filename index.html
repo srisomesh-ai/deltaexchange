@@ -130,7 +130,7 @@
 <body>
 
 <div class="bar">
-  <h1>🌱 Delta Trader <span class="v">v15</span></h1>
+  <h1>🌱 Delta Trader <span class="v">v16</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:12px">connecting…</span>
   <select id="symbol"></select>
   <span id="envPill" class="pill-env"></span>
@@ -193,8 +193,16 @@
   <!-- CENTER: scanner + orderbook + positions -->
   <div class="col">
     <div class="card">
-      <h2>🔍 Market Scanner — Top Opportunities <button onclick="runScan()" id="scanBtn" style="font-size:11px;padding:5px 12px;font-weight:600">Scan now</button></h2>
-      <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Scans the most liquid perpetuals and ranks by momentum + signal strength. Tap a coin to load it, then decide.</div>
+      <h2>🔍 Market Scanner — Top Opportunities
+        <span style="display:flex;gap:6px;align-items:center">
+          <select id="scanCount" style="font-size:11px;padding:4px 8px" onchange="if(lastScan.length)renderScan(lastScan.slice(0,+this.value))">
+            <option value="5">Top 5</option><option value="10">Top 10</option><option value="20">Top 20</option>
+          </select>
+          <button onclick="runScan()" id="scanBtn" style="font-size:11px;padding:5px 12px;font-weight:600">Scan now</button>
+        </span>
+      </h2>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:4px">Scans <b>every</b> liquid perpetual on Delta, computes real 24h movement, and ranks the strongest setups. Tap a coin to load it.</div>
+      <div id="scanInfo" style="font-size:10px;color:var(--dim);margin-bottom:10px"></div>
       <div style="position:relative;margin-bottom:12px">
         <input id="coinSearch" placeholder="🔎 Search any coin — type BTC, SOL, ETH…" autocomplete="off" style="width:100%;background:var(--panel2);border-color:transparent">
         <div id="searchResults" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);max-height:260px;overflow:auto;z-index:50;margin-top:4px"></div>
@@ -661,28 +669,49 @@ async function runScan(){
   const btn=$('scanBtn'); if(btn){btn.textContent='Scanning…';btn.disabled=true;}
   try{
     const j=await pubGet('/v2/tickers');
+    // keep only perpetuals with a real mark price
     let all=(j.result||[]).filter(t=>{
       const sym=t.symbol||'';
-      return t.contract_type==='perpetual_futures' || (sym.endsWith('USD') && t.mark_price);
+      return (t.contract_type==='perpetual_futures' || sym.endsWith('USD')) && +t.mark_price>0;
     });
-    all.sort((a,b)=>(+b.turnover_usd||+b.volume||0)-(+a.turnover_usd||+a.volume||0));
-    const top=all.slice(0,15);
-    const scored=top.map(t=>{
+
+    // liquidity floor: drop illiquid dust, but scan EVERYTHING above the floor
+    const withVol=all.map(t=>({t,vol:+t.turnover_usd||+t.turnover||+t.volume||0}));
+    withVol.sort((a,b)=>b.vol-a.vol);
+    const median=withVol[Math.floor(withVol.length/2)]?.vol||0;
+    const candidates=withVol.filter(x=>x.vol>=Math.min(median,1)).map(x=>x.t);
+
+    const scored=candidates.map(t=>{
       const mark=+t.mark_price||0, spot=+t.spot_price||mark;
-      let chg=+t.change_24h; if(chg!=null&&Math.abs(chg)<1)chg=chg*100;
+      // COMPUTE 24h change ourselves from the 24h open — no guessing field units
+      const open=+t.open||0;
+      const chg = open>0 ? ((mark-open)/open*100) : null;
       const fr=+t.funding_rate||0;
       const basis=spot? (mark-spot)/spot*100 : 0;
-      const dirScore=(chg||0)*0.5 + basis*2 - fr*1500;
-      const strength=Math.min(1, (Math.abs(chg||0)/3)*0.6 + Math.abs(basis)/0.2*0.2 + Math.abs(fr)*1000*0.2);
-      const dir = dirScore>0?'LONG':dirScore<0?'SHORT':'—';
-      return {sym:t.symbol, chg:chg||0, mark, dir, strength:+strength.toFixed(2), fr};
-    });
+      // 24h range position: near high = bullish pressure, near low = bearish
+      const hi=+t.high||0, lo=+t.low||0;
+      const rangePos=(hi>lo)? (mark-lo)/(hi-lo) : 0.5;
+      const vol=+t.turnover_usd||+t.turnover||+t.volume||0;
+
+      const dirScore=(chg||0)*0.6 + (rangePos-0.5)*2 + basis*1.5 - fr*1000;
+      const strength=Math.min(1,
+        Math.abs(chg||0)/5*0.7 +
+        Math.abs(rangePos-0.5)*2*0.2 +
+        Math.min(Math.abs(fr)*2000,1)*0.1
+      );
+      const dir = dirScore>0.3?'LONG':dirScore<-0.3?'SHORT':'—';
+      return {sym:t.symbol, chg, mark, dir, strength:+strength.toFixed(2), fr, vol};
+    }).filter(c=>c.chg!==null);   // drop anything we couldn't compute honestly
+
     scored.sort((a,b)=>b.strength-a.strength);
-    renderScan(scored.slice(0,5));
+    lastScan=scored;
+    renderScan(scored.slice(0,+($('scanCount')?.value||5)));
+    const info=$('scanInfo'); if(info)info.textContent=`scanned ${scored.length} coins · ranked by real 24h movement + positioning`;
   }catch(e){$('scanList').innerHTML='<div class="r" style="font-size:12px">Scan failed: '+e.message+'</div>';}
   scanning=false;
   if(btn){btn.textContent='Scan now';btn.disabled=false;}
 }
+let lastScan=[];
 function renderScan(list){
   if(!list.length){$('scanList').innerHTML='<div class="dim">No results.</div>';return;}
   $('scanList').innerHTML=list.map((c,i)=>{
