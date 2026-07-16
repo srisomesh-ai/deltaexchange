@@ -23,11 +23,16 @@ Browser (dashboard)  →  delta-proxy.php (signs)  →  Delta Exchange API
 
 ## Setup
 
-1. **Edit `delta-proxy.php`** — fill in:
+**Your API keys live ONLY on the server, never in this repo.**
+
+1. **Deploy** the repo files to your host (Hostinger).
+2. **Create `delta-config.php`** by hand on the server (same folder as
+   `delta-proxy.php`). Copy `delta-config.sample.php` and fill in:
    - `$API_KEY` — your Delta India API key
    - `$API_SECRET` — your Delta India API secret
-   - `$PROXY_TOKEN` — a password you invent (any long random string)
-2. **Deploy** both files to your host (Hostinger).
+   - `$PROXY_TOKEN` — a password you invent
+   This file is git-ignored, so it's never committed and never overwritten
+   when the proxy is redeployed.
 3. **Whitelist your server IP** in Delta → API settings.
    Find it via hPanel terminal: `curl ifconfig.me`
 4. Open the dashboard, tap **⚙ Proxy**, enter:

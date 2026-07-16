@@ -6,23 +6,40 @@
  * The browser NEVER sees the secret.
  *
  * SETUP:
- *   1. Put your keys in $API_KEY / $API_SECRET below.
- *   2. Upload to Hostinger (e.g. /public_html/delta-proxy.php).
+ *   1. Create delta-config.php ON THE SERVER (see below) with your keys.
+ *      This file is NOT in the repo, so your secrets never touch GitHub and
+ *      are never overwritten when this proxy is redeployed.
+ *   2. Upload this file to Hostinger (e.g. /public_html/delta-proxy.php).
  *   3. Whitelist your Hostinger server's OUTBOUND IP in Delta > API settings.
- *      (Find it: create phpinfo() or run  curl ifconfig.me  from hPanel terminal.)
- *   4. Set $ALLOWED_ORIGIN to your dashboard URL to lock down CORS.
+ *      (Find it: run  curl ifconfig.me  from hPanel terminal.)
+ *
+ * delta-config.php  (create by hand on server, same folder as this file):
+ *   <?php
+ *   $API_KEY      = 'your_delta_api_key';
+ *   $API_SECRET   = 'your_delta_api_secret';
+ *   $PROXY_TOKEN  = 'a_password_you_invent';   // must match dashboard ⚙ token
+ *   $ALLOWED_ORIGIN = '*';   // or 'https://yourdomain.com' to lock down
  *
  * SECURITY:
- *   - Add a shared secret ($PROXY_TOKEN) so only your dashboard can call this.
- *   - Keep this file's URL private. Anyone who can POST here can trade your account.
+ *   - Keep this file's URL private. Anyone who can POST here + knows the token
+ *     can trade your account.
  */
 
-// ====== CONFIG ======================================================
-$API_KEY      = 'PASTE_YOUR_DELTA_API_KEY';
-$API_SECRET   = 'PASTE_YOUR_DELTA_API_SECRET';
-$BASE_URL     = 'https://api.india.delta.exchange';   // India production
-$PROXY_TOKEN  = 'CHANGE_ME_to_a_long_random_string';  // must match dashboard
-$ALLOWED_ORIGIN = '*';   // set to 'https://yourdomain.com' in production
+// ====== LOAD CONFIG (secrets live in delta-config.php, NOT in repo) ==
+$BASE_URL = 'https://api.india.delta.exchange';   // India production
+$cfgFile  = __DIR__ . '/delta-config.php';
+if (!file_exists($cfgFile)) {
+    http_response_code(500);
+    echo json_encode(['success'=>false,'error'=>'delta-config.php missing on server. Create it with your API keys.']);
+    exit;
+}
+require $cfgFile;   // defines $API_KEY, $API_SECRET, $PROXY_TOKEN, $ALLOWED_ORIGIN
+if (!isset($ALLOWED_ORIGIN)) $ALLOWED_ORIGIN = '*';
+if (empty($API_KEY) || empty($API_SECRET) || empty($PROXY_TOKEN)) {
+    http_response_code(500);
+    echo json_encode(['success'=>false,'error'=>'delta-config.php is missing one of API_KEY / API_SECRET / PROXY_TOKEN.']);
+    exit;
+}
 // ====================================================================
 
 header('Content-Type: application/json');
