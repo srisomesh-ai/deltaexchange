@@ -120,12 +120,17 @@
   .scan-chg{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
   .scan-dir{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px}
   .scan-score{font-weight:700;font-variant-numeric:tabular-nums;font-size:13px;min-width:44px;text-align:right}
+  .sr-row{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--line)}
+  .sr-row:hover{background:var(--panel2)}
+  .sr-row:last-child{border-bottom:0}
+  .sr-sym{font-weight:700}
+  .sr-px{color:var(--dim);font-variant-numeric:tabular-nums;font-size:12px}
 </style>
 </head>
 <body>
 
 <div class="bar">
-  <h1>🌱 Delta Trader <span class="v">v14</span></h1>
+  <h1>🌱 Delta Trader <span class="v">v15</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:12px">connecting…</span>
   <select id="symbol"></select>
   <span id="envPill" class="pill-env"></span>
@@ -190,7 +195,11 @@
     <div class="card">
       <h2>🔍 Market Scanner — Top Opportunities <button onclick="runScan()" id="scanBtn" style="font-size:11px;padding:5px 12px;font-weight:600">Scan now</button></h2>
       <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Scans the most liquid perpetuals and ranks by momentum + signal strength. Tap a coin to load it, then decide.</div>
-      <div id="scanList"><div class="dim" style="font-size:12px">Tap "Scan now" to find trending coins.</div></div>
+      <div style="position:relative;margin-bottom:12px">
+        <input id="coinSearch" placeholder="🔎 Search any coin — type BTC, SOL, ETH…" autocomplete="off" style="width:100%;background:var(--panel2);border-color:transparent">
+        <div id="searchResults" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);max-height:260px;overflow:auto;z-index:50;margin-top:4px"></div>
+      </div>
+      <div id="scanList"><div class="dim" style="font-size:12px">Tap "Scan now" to find trending coins, or search any coin above.</div></div>
       <label style="display:flex;align-items:center;gap:7px;font-size:11px;margin-top:10px;color:var(--dim)">
         <input type="checkbox" id="autoScan" style="width:auto"> Auto-refresh scan every 30s</label>
     </div>
@@ -694,6 +703,24 @@ function pickScan(sym){
   log('📊 loaded '+sym+' from scanner');
 }
 
+// ---- searchable coin picker (all perpetuals) ----
+function doSearch(){
+  const q=($('coinSearch').value||'').trim().toUpperCase();
+  const box=$('searchResults');
+  if(!q){box.style.display='none';return;}
+  const hits=products.filter(p=>p.symbol.toUpperCase().includes(q)).slice(0,20);
+  if(!hits.length){box.innerHTML='<div class="sr-row dim">No coin matches "'+q+'"</div>';box.style.display='block';return;}
+  box.innerHTML=hits.map(p=>`<div class="sr-row" onclick="pickSearch('${p.symbol}')"><span class="sr-sym">${p.symbol}</span><span class="sr-px">${p.contract_type||'perpetual'}</span></div>`).join('');
+  box.style.display='block';
+}
+function pickSearch(sym){
+  $('coinSearch').value='';
+  $('searchResults').style.display='none';
+  const sel=$('symbol'); if(sel)sel.value=sym;
+  selectSymbol(sym);
+  log('🔎 loaded '+sym+' from search');
+}
+
 /* ================= SIGNAL ENGINE (observe & log, no orders) ================= */
 let priceHist=[];     // {t, mark}
 let oiHist=[];        // {t, oi}
@@ -892,6 +919,14 @@ window.toggleCfg=toggleCfg; window.saveCfg=saveCfg; window.placeOrder=placeOrder
 window.setSide=setSide; window.onType=onType; window.posTab=posTab;
 window.cancelOrder=cancelOrder; window.exportJournal=exportJournal; window.setEnv=setEnv;
 window.runScan=runScan; window.pickScan=pickScan;
+window.doSearch=doSearch; window.pickSearch=pickSearch;
+$('coinSearch')?.addEventListener('input',doSearch);
+$('coinSearch')?.addEventListener('focus',doSearch);
+document.addEventListener('click',(e)=>{
+  if(!e.target.closest('#coinSearch')&&!e.target.closest('#searchResults')){
+    const sr=$('searchResults'); if(sr)sr.style.display='none';
+  }
+});
 let autoScanTimer=null;
 $('autoScan')?.addEventListener('change',()=>{
   if($('autoScan').checked){runScan();autoScanTimer=setInterval(runScan,30000);}
