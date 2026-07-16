@@ -130,7 +130,7 @@
 <body>
 
 <div class="bar">
-  <h1>🌱 Delta Trader <span class="v">v18</span></h1>
+  <h1>🌱 Delta Trader <span class="v">v19</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:12px">connecting…</span>
   <select id="symbol"></select>
   <span id="envPill" class="pill-env"></span>
@@ -302,10 +302,18 @@
         <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600">
           <input type="checkbox" id="autoExec" style="width:auto"> AUTO-EXECUTE</label>
         <div id="autoExecMsg" style="font-size:10px;color:var(--dim);margin-top:5px">Trades strong signals with bracket SL/TP, one position at a time. Testnet only until proven.</div>
-        <div class="row2" style="margin-top:8px">
-          <div class="fld" style="margin:0"><label>Robot size</label><input id="botSize" type="number" value="1" style="padding:5px"></div>
-          <div class="fld" style="margin:0"><label>Min score</label><input id="botScore" type="number" step="0.05" value="0.45" style="padding:5px"></div>
+        <div class="fld" style="margin:0 0 8px"><label>Position sizing</label>
+          <select id="sizeMode" style="padding:6px">
+            <option value="pct">% of balance (auto lots)</option>
+            <option value="fixed">Fixed contracts</option>
+          </select>
         </div>
+        <div class="row2">
+          <div class="fld" style="margin:0"><label id="sizeLbl">Balance % per trade</label><input id="botPct" type="number" step="1" value="10" style="padding:5px"></div>
+          <div class="fld" style="margin:0"><label>Min strength</label><input id="botScore" type="number" step="0.05" value="0.45" style="padding:5px"></div>
+        </div>
+        <input id="botSize" type="hidden" value="1">
+        <div id="sizeCalc" style="font-size:10px;color:var(--dim);margin-top:6px"></div>
       </div>
 
       <!-- ROBOT STATUS PANEL -->
@@ -331,6 +339,7 @@ let PROXY = localStorage.getItem('dx_proxy') || '';
 let PTOKEN = localStorage.getItem('dx_token') || '';
 let ENV = localStorage.getItem('dx_env') || 'live';   // 'live' or 'testnet'
 let curTab='pos';
+let availBalance=0;   // available settle-currency balance for sizing
 let products = [];      // perpetual futures
 let cur = null;         // current product object
 let side = 'buy';
@@ -586,6 +595,9 @@ async function loadBalance(){
     const avail=b=>+(b.available_balance ?? b.available_balance_for_robo ?? b.balance ?? 0);
     const sym=b=>b.asset_symbol || b.asset?.symbol || b.symbol || ('asset '+(b.asset_id ?? '?'));
     const rows=all.filter(b=>bal(b)>0);
+    // capture available balance in settle currency (USD/USDT) for robot sizing
+    const settle=all.find(b=>/USD/i.test(sym(b))) || all[0];
+    if(settle){availBalance=avail(settle);updateSizeCalc();}
     if(!rows.length){
       // show raw so we can see what's actually there
       $('posBox').innerHTML='<div class="dim" style="margin-bottom:6px">No non-zero balance found. Raw response:</div>'+
@@ -897,6 +909,30 @@ function updateRobotStatus(){
 
 let botBusy=false;   // prevents overlap while checking/placing
 
+// compute how many contracts a %-of-balance works out to for a given coin
+function computeContracts(prod, price){
+  const mode=$('sizeMode')?.value||'pct';
+  if(mode==='fixed') return parseInt($('botPct').value)||1;   // reuse field as fixed count in fixed mode
+  const pct=(+$('botPct').value||10)/100;
+  const lev=parseInt($('lev').value)||10;
+  const cv=prod.contract_value?+prod.contract_value:1;   // underlying per contract
+  // notional we want to control = balance * pct * leverage
+  const notional=availBalance*pct*lev;
+  const perContract=price*cv;                            // USD value of 1 contract
+  if(perContract<=0) return 1;
+  return Math.max(1, Math.floor(notional/perContract));
+}
+function updateSizeCalc(){
+  const el=$('sizeCalc'); if(!el)return;
+  const mode=$('sizeMode')?.value||'pct';
+  if(mode==='fixed'){el.textContent='Fixed '+($('botPct').value||1)+' contracts per trade (same count every coin).';
+    if($('sizeLbl'))$('sizeLbl').textContent='Fixed contracts';return;}
+  if($('sizeLbl'))$('sizeLbl').textContent='Balance % per trade';
+  if(!availBalance){el.textContent='Connect + load balance to see auto lot size.';return;}
+  const pct=+$('botPct').value||10, lev=parseInt($('lev').value)||10;
+  el.innerHTML=`Using <b>${pct}%</b> of ${fmt(availBalance,2)} × ${lev}x = ${fmt(availBalance*pct/100*lev,2)} notional. Robot converts this to the right lots for each coin it picks.`;
+}
+
 // ===== SCANNER-DRIVEN ROBOT: auto-picks best coin from scan, trades it =====
 let robotLoopTimer=null;
 function startRobotLoop(){
@@ -931,8 +967,8 @@ async function robotTick(){
     selectSymbol(pick.sym);
 
     const botSide = pick.dir==='LONG'?'buy':'sell';
-    const size=parseInt($('botSize').value)||1;
     const mark=pick.mark;
+    const size=computeContracts(prod, mark);
     const slP=+$('slPct').value||0.3, tpP=+$('tpPct').value||0.6;
     const isBuy=botSide==='buy';
     const tick=prod.tick_size?+prod.tick_size:0.5;
@@ -1038,6 +1074,7 @@ refreshEnvUI();
 
 // robot status wiring + confirmations
 $('sigOn')?.addEventListener('change',()=>{
+  localStorage.setItem('dx_engineOn',$('sigOn').checked?'1':'0');
   updateRobotStatus();
   if($('sigOn').checked)log('✓ engine ON — watching market');
   else log('engine OFF');
@@ -1051,8 +1088,9 @@ $('autoExec')?.addEventListener('change',()=>{
       alert('Turn the Engine ON first, then arm auto-execute.');
       $('autoExec').checked=false;
     }else{
-      const size=$('botSize').value, minS=$('botScore').value;
-      const ok=confirm(`ARM THE AUTO-PICK ROBOT?\n\nEnvironment: TESTNET (fake money)\nSize: ${size} contracts per trade\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\n\nThe robot will SCAN the whole market, pick the STRONGEST coin above min strength, and trade it automatically — one position at a time. It chooses the coin, not you.\n\nConfirm to arm?`);
+      const mode=$('sizeMode').value, pct=$('botPct').value, minS=$('botScore').value;
+      const sizeDesc = mode==='pct' ? `${pct}% of balance (auto lots per coin)` : `${pct} fixed contracts`;
+      const ok=confirm(`ARM THE AUTO-PICK ROBOT?\n\nEnvironment: TESTNET (fake money)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\n\nThe robot SCANS the whole market, picks the STRONGEST coin, sizes from your balance %, and trades it — one at a time. It chooses the coin.\n\nConfirm to arm?`);
       if(ok){log('🤖 ROBOT ARMED — auto-picking best coin from scanner');startRobotLoop();}
       else $('autoExec').checked=false;
     }
@@ -1062,6 +1100,21 @@ $('autoExec')?.addEventListener('change',()=>{
   }
   updateRobotStatus();
 });
+['botPct','botScore','slPct','tpPct','lev','sizeMode','dailyLimit'].forEach(id=>{
+  const el=$(id); if(!el)return;
+  // restore saved value
+  const saved=localStorage.getItem('dx_set_'+id);
+  if(saved!==null && saved!=='')el.value=saved;
+  // save on change
+  el.addEventListener('input',()=>{localStorage.setItem('dx_set_'+id,el.value);updateSizeCalc();updateRobotStatus();});
+  el.addEventListener('change',()=>{localStorage.setItem('dx_set_'+id,el.value);updateSizeCalc();});
+});
+// restore engine/auto toggles (but NOT auto-arm silently — see note)
+if(localStorage.getItem('dx_engineOn')==='1'){const s=$('sigOn');if(s){s.checked=true;}}
+updateSizeCalc();
+$('sizeMode')?.addEventListener('change',()=>{localStorage.setItem('dx_set_sizeMode',$('sizeMode').value);updateSizeCalc();});
+$('botPct')?.addEventListener('input',()=>{localStorage.setItem('dx_set_botPct',$('botPct').value);updateSizeCalc();});
+updateSizeCalc();
 ['botSize','botScore'].forEach(id=>$(id)?.addEventListener('input',updateRobotStatus));
 updateRobotStatus();
 loadProducts();
