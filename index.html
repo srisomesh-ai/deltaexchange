@@ -70,31 +70,26 @@
 <body>
 
 <div class="bar">
-  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v5</span></h1>
+  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v6</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim" id="wstxt">connecting…</span>
   <select id="symbol"></select>
   <button id="proxyBtn" onclick="toggleCfg()" style="position:relative;z-index:10">⚙ Proxy</button>
   <span style="margin-left:auto" class="dim" id="clock"></span>
 </div>
 
-<!-- PROXY SETTINGS OVERLAY -->
-<div id="cfgOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:flex-start;justify-content:center;padding-top:70px">
-  <div style="background:var(--panel);border:1px solid var(--accent);border-radius:12px;padding:18px;width:92%;max-width:440px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <b style="font-size:15px">⚙ Proxy Settings</b>
-      <button onclick="toggleCfg()" style="padding:4px 10px">✕</button>
-    </div>
-    <label style="font-size:11px;color:var(--dim)">Proxy URL</label>
-    <input id="cfgUrl" placeholder="https://yoursite.com/delta-proxy.php" style="width:100%;margin:4px 0 10px">
-    <label style="font-size:11px;color:var(--dim)">Proxy token (password from PHP file)</label>
-    <input id="cfgTok" placeholder="your $PROXY_TOKEN" style="width:100%;margin:4px 0 12px">
-    <button onclick="saveCfg()" style="width:100%;padding:12px;background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700">Save &amp; Test</button>
-    <div id="cfgMsg" style="font-size:12px;margin-top:10px;color:var(--dim)"></div>
-  </div>
+<div class="warn">
+  ⚠ <b>Live trading.</b> Market data is public. Balance, positions &amp; orders route through your PHP proxy.
 </div>
 
-<div class="warn">
-  ⚠ <b>Live trading.</b> Market data is public (direct from Delta). Balance, positions &amp; order placement route through your PHP proxy — set the proxy URL + token under ⚙ first. Never expose your API secret in this page.
+<!-- ALWAYS-VISIBLE PROXY BAR (no button needed) -->
+<div style="background:var(--panel2);border:1px solid var(--accent);border-radius:10px;padding:12px;margin:10px">
+  <div style="font-size:11px;color:var(--dim);margin-bottom:8px">⚙ PROXY CONNECTION — fill these to load balance &amp; enable trading</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <input id="cfgUrl" placeholder="Proxy URL (https://.../delta-proxy.php)" style="flex:2;min-width:200px">
+    <input id="cfgTok" placeholder="Token" style="flex:1;min-width:120px">
+    <button onclick="saveCfg()" id="saveCfgBtn" style="background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;padding:9px 18px">Save &amp; Connect</button>
+  </div>
+  <div id="cfgMsg" style="font-size:12px;margin-top:8px;color:var(--dim)"></div>
 </div>
 
 <div class="grid">
@@ -330,10 +325,8 @@ $('symbol')?.addEventListener('change',e=>selectSymbol(e.target.value));
 ['size','price'].forEach(id=>$(id)?.addEventListener('input',updateNotional));
 
 function toggleCfg(){
-  const o=$('cfgOverlay');
-  const showing=o.style.display==='flex';
-  o.style.display=showing?'none':'flex';
-  if(!showing){$('cfgUrl').value=PROXY;$('cfgTok').value=PTOKEN;}
+  const el=$('cfgUrl');
+  if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.focus();}
 }
 function saveCfg(){
   PROXY=$('cfgUrl').value.trim(); PTOKEN=$('cfgTok').value.trim();
@@ -447,8 +440,12 @@ function runAuto(imb){
 }
 
 /* ================= INIT ================= */
+// prefill proxy fields from saved values
+if($('cfgUrl'))$('cfgUrl').value=PROXY;
+if($('cfgTok'))$('cfgTok').value=PTOKEN;
 // Belt-and-suspenders: bind buttons in JS too, in case inline onclick is blocked
 document.getElementById('proxyBtn')?.addEventListener('click',toggleCfg);
+document.getElementById('saveCfgBtn')?.addEventListener('click',saveCfg);
 window.toggleCfg=toggleCfg; window.saveCfg=saveCfg; window.placeOrder=placeOrder;
 window.setSide=setSide; window.onType=onType; window.posTab=posTab;
 window.cancelOrder=cancelOrder;
