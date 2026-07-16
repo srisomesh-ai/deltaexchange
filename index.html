@@ -70,7 +70,7 @@
 <body>
 
 <div class="bar">
-  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v7</span></h1>
+  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v8</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim" id="wstxt">connecting…</span>
   <select id="symbol"></select>
   <button id="proxyBtn" onclick="toggleCfg()" style="position:relative;z-index:10">⚙ Proxy</button>
@@ -161,8 +161,30 @@
         <input id="size" type="number" step="1" value="1"></div>
       <div class="fld"><label>Leverage</label>
         <input id="lev" type="number" step="1" value="10"></div>
+
+      <div class="row2">
+        <div class="fld"><label>Stop-loss %</label>
+          <input id="slPct" type="number" step="0.1" value="0.3"></div>
+        <div class="fld"><label>Take-profit %</label>
+          <input id="tpPct" type="number" step="0.1" value="0.6"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px">
+        <input type="checkbox" id="useBracket" checked style="width:auto"> Attach auto SL/TP to entry (bracket)</label>
+      <div class="dim" style="font-size:11px;margin-bottom:8px" id="sltpPreview">SL/TP: —</div>
+
       <button class="submit buy" id="submitBtn" onclick="placeOrder()">Place BUY order</button>
       <div class="dim" style="margin-top:6px;font-size:11px" id="notional">Notional: —</div>
+    </div>
+
+    <div class="card" style="margin-bottom:10px">
+      <h2>Risk Guard</h2>
+      <div class="row2">
+        <div class="fld"><label>Daily loss limit (settle ccy)</label>
+          <input id="dailyLimit" type="number" step="any" placeholder="e.g. 2000"></div>
+        <div class="fld"><label>Today's realized PnL</label>
+          <input id="todayPnl" type="number" step="any" value="0" readonly style="background:var(--bg)"></div>
+      </div>
+      <div id="guardMsg" style="font-size:11px;color:var(--dim)">Set a daily loss limit to arm the kill-switch. Blocks new entries after the limit; existing positions untouched.</div>
     </div>
 
     <div class="card">
@@ -309,7 +331,7 @@ function updateNotional(){
   $('notional').textContent='Notional ≈ '+fmt(notional,2)+'  ('+cur.settling_asset?.symbol||'USDT'+')';
 }
 
-function refreshAll(){loadTicker();loadBook();}
+function refreshAll(){loadTicker();loadBook();updateSLTPPreview();}
 setInterval(refreshAll,3000);
 
 /* ================= UI ================= */
@@ -319,10 +341,13 @@ function setSide(s){side=s;
   const b=$('submitBtn');
   b.className='submit '+s;
   b.textContent='Place '+(s==='buy'?'BUY':'SELL')+' order';
+  updateSLTPPreview();
 }
 function onType(){$('priceFld').style.display=$('otype').value==='limit_order'?'block':'none';updateNotional();}
 $('symbol')?.addEventListener('change',e=>selectSymbol(e.target.value));
 ['size','price'].forEach(id=>$(id)?.addEventListener('input',updateNotional));
+['slPct','tpPct','price'].forEach(id=>$(id)?.addEventListener('input',updateSLTPPreview));
+$('dailyLimit')?.addEventListener('input',checkGuard);
 
 function toggleCfg(){
   const el=$('cfgUrl');
@@ -360,10 +385,25 @@ async function loadPositions(){
   try{
     const j=await proxy('GET','/v2/positions/margined');
     const rows=(j.result||[]).filter(p=>+p.size!==0);
+    // feed live PnL into the risk guard
+    const totPnl=(j.result||[]).reduce((s,p)=>s+(+p.unrealized_pnl||0),0);
+    if($('todayPnl'))$('todayPnl').value=totPnl.toFixed(2);
+    checkGuard();
     if(!rows.length){$('posBox').innerHTML='<div class="dim">No open positions.</div>';return;}
     $('posBox').innerHTML='<table><tr><th>Sym</th><th>Size</th><th>Entry</th><th>uPnL</th></tr>'+
       rows.map(p=>`<tr><td>${p.product_symbol||p.product_id}</td><td class="${+p.size>0?'g':'r'}">${p.size}</td><td>${fmt(+p.entry_price,priceDp())}</td><td class="${+p.unrealized_pnl>=0?'g':'r'}">${fmt(+p.unrealized_pnl,2)}</td></tr>`).join('')+'</table>';
   }catch(e){$('posBox').innerHTML='<div class="r">'+e.message+'</div>';}
+}
+function checkGuard(){
+  const lim=+$('dailyLimit').value||0;
+  const b=$('submitBtn');
+  if(lim>0 && guardBlocks()){
+    $('guardMsg').innerHTML='<span class="r">🛑 Loss limit hit — new entries blocked.</span>';
+    if(b){b.style.opacity=.4;b.style.pointerEvents='none';}
+  }else{
+    if(b){b.style.opacity=1;b.style.pointerEvents='auto';}
+    if(lim>0)$('guardMsg').innerHTML='<span class="g">✓ Guard armed</span> — blocks entries if PnL ≤ -'+lim;
+  }
 }
 async function loadOrders(){
   if(!PROXY){$('posBox').innerHTML='<div class="dim">Set proxy first.</div>';return;}
@@ -404,25 +444,70 @@ async function loadBalance(){
 }
 
 /* ================= ORDERS ================= */
+function roundTick(px){
+  const t=cur&&cur.tick_size?+cur.tick_size:0.5;
+  return (Math.round(px/t)*t).toFixed(String(t).includes('.')?String(t).split('.')[1].length:0);
+}
+function calcSLTP(entryPx){
+  const slP=+$('slPct').value||0, tpP=+$('tpPct').value||0;
+  const isBuy=side==='buy';
+  // buy: SL below, TP above.  sell: SL above, TP below.
+  const sl= isBuy ? entryPx*(1-slP/100) : entryPx*(1+slP/100);
+  const tp= isBuy ? entryPx*(1+tpP/100) : entryPx*(1-tpP/100);
+  return {sl:roundTick(sl), tp:roundTick(tp)};
+}
+function updateSLTPPreview(){
+  if(!cur||!ticker.mark_price){$('sltpPreview').textContent='SL/TP: —';return;}
+  const entry=$('otype').value==='limit_order'?(+$('price').value||+ticker.mark_price):+ticker.mark_price;
+  const {sl,tp}=calcSLTP(entry);
+  $('sltpPreview').innerHTML=`SL <span class="r">${sl}</span> · TP <span class="g">${tp}</span> (from ${fmt(entry,priceDp())})`;
+}
+
+// ---- daily loss guard ----
+function guardBlocks(){
+  const lim=+$('dailyLimit').value||0;
+  if(lim<=0)return false; // not armed
+  const pnl=+$('todayPnl').value||0;
+  return pnl <= -Math.abs(lim);
+}
+
 async function placeOrder(){
   if(!cur)return;
-  if(!PROXY){alert('Set proxy URL + token first (⚙).');return;}
+  if(!PROXY){alert('Set proxy URL + token first.');return;}
+  if(guardBlocks()){
+    $('guardMsg').innerHTML='<span class="r">🛑 Daily loss limit hit — new entries blocked. Override by clearing the limit field.</span>';
+    alert('Daily loss limit reached. New entries are blocked.');
+    return;
+  }
   const size=parseInt($('size').value)||0;
   if(size<=0){alert('size?');return;}
   const otype=$('otype').value;
+  const entryPx=otype==='limit_order'?(+$('price').value||+ticker.mark_price):+ticker.mark_price;
   const body={
     product_id:cur.id, product_symbol:cur.symbol,
     size, side, order_type:otype
   };
   if(otype==='limit_order'){body.limit_price=String(+$('price').value||0);}
-  if(!confirm(`${side.toUpperCase()} ${size} ${cur.symbol} — ${otype.replace('_',' ')}. Confirm?`))return;
+
+  // attach bracket SL/TP (exchange-held exits)
+  let sltpText='no SL/TP';
+  if($('useBracket').checked){
+    const {sl,tp}=calcSLTP(entryPx);
+    body.bracket_stop_loss_price=String(sl);
+    body.bracket_stop_loss_limit_price=String(sl);   // market-like; equal price
+    body.bracket_take_profit_price=String(tp);
+    body.bracket_take_profit_limit_price=String(tp);
+    body.bracket_stop_trigger_method='mark_price';   // only mark price allowed for brackets
+    sltpText=`SL ${sl} / TP ${tp}`;
+  }
+
+  if(!confirm(`${side.toUpperCase()} ${size} ${cur.symbol} @ ${otype==='market_order'?'market':body.limit_price}\n${sltpText}\nConfirm?`))return;
   try{
-    // set leverage first (best-effort)
     const lev=parseInt($('lev').value)||10;
     await proxy('POST','/v2/products/'+cur.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
     const j=await proxy('POST','/v2/orders',{body});
     if(j.success===false){log('order rejected: '+JSON.stringify(j.error));alert('Rejected: '+JSON.stringify(j.error));}
-    else{log('order placed id='+(j.result?.id));loadPositions();}
+    else{log(`${side.toUpperCase()} ${size} placed id=${j.result?.id} · ${sltpText}`);loadPositions();}
   }catch(e){log('order error: '+e.message);alert(e.message);}
 }
 async function cancelOrder(id,pid){
