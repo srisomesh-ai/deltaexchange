@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delta Trader — Perpetual Futures</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#111722; --panel2:#161d2b; --line:#1e2839;
+    --txt:#d6deeb; --dim:#7b8aa3; --green:#16c784; --red:#ea3943;
+    --accent:#3b82f6; --amber:#f0b429;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font:13px/1.4 -apple-system,Segoe UI,Roboto,sans-serif}
+  .bar{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .bar h1{font-size:15px;font-weight:700;letter-spacing:.3px}
+  .bar .dot{width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block}
+  .bar .dot.on{background:var(--green)}
+  select,input,button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font-size:13px}
+  button{cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  .grid{display:grid;grid-template-columns:280px 1fr 320px;gap:10px;padding:10px}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .card h2{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin-bottom:10px}
+  .kv{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}
+  .kv:last-child{border:0}
+  .kv .v{font-variant-numeric:tabular-nums;font-weight:600}
+  .g{color:var(--green)} .r{color:var(--red)} .dim{color:var(--dim)}
+  .big{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+  .ob{font-variant-numeric:tabular-nums;font-size:12px}
+  .ob-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;padding:2px 4px;position:relative;z-index:1}
+  .ob-row span:nth-child(2){text-align:center;color:var(--dim)}
+  .ob-row span:nth-child(3){text-align:right}
+  .ob-bar{position:absolute;top:0;bottom:0;right:0;z-index:0;opacity:.14}
+  .ob-bar.buy{background:var(--green)} .ob-bar.sell{background:var(--red)}
+  .spread{text-align:center;padding:6px;color:var(--amber);font-weight:700;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:4px 0}
+  .tabs{display:flex;gap:6px;margin-bottom:10px}
+  .tabs button{flex:1;padding:6px;font-size:12px}
+  .tabs button.act{background:var(--accent);border-color:var(--accent);color:#fff}
+  .side-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+  .side-btns button{padding:10px;font-weight:700}
+  .buy-btn{background:rgba(22,199,132,.15);border-color:var(--green);color:var(--green)}
+  .buy-btn.act{background:var(--green);color:#fff}
+  .sell-btn{background:rgba(234,57,67,.15);border-color:var(--red);color:var(--red)}
+  .sell-btn.act{background:var(--red);color:#fff}
+  .fld{margin-bottom:8px}
+  .fld label{display:block;font-size:11px;color:var(--dim);margin-bottom:3px}
+  .fld input,.fld select{width:100%}
+  .submit{width:100%;padding:12px;font-weight:700;font-size:14px;margin-top:4px}
+  .submit.buy{background:var(--green);border-color:var(--green);color:#fff}
+  .submit.sell{background:var(--red);border-color:var(--red);color:#fff}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  th{color:var(--dim);font-weight:600;font-size:10px;text-transform:uppercase}
+  .log{font:11px/1.5 monospace;color:var(--dim);max-height:120px;overflow:auto;background:var(--bg);border-radius:6px;padding:8px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .liq{display:flex;gap:4px;height:26px;border-radius:5px;overflow:hidden;margin-top:6px}
+  .liq .l{background:var(--green)} .liq .s{background:var(--red)}
+  .pill{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700}
+  .warn{background:rgba(240,180,41,.12);border:1px solid var(--amber);color:var(--amber);border-radius:8px;padding:8px 10px;font-size:11px;margin:10px}
+  .cfg{display:none;padding:10px;background:var(--panel2);border-radius:8px;margin-bottom:10px}
+  .cfg.show{display:block}
+  .cfg input{width:100%;margin-bottom:6px}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>⚡ Delta Trader</h1>
+  <span class="dot" id="wsdot"></span><span class="dim" id="wstxt">connecting…</span>
+  <select id="symbol"></select>
+  <button onclick="toggleCfg()">⚙ Proxy</button>
+  <span style="margin-left:auto" class="dim" id="clock"></span>
+</div>
+
+<!-- PROXY SETTINGS OVERLAY -->
+<div id="cfgOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:flex-start;justify-content:center;padding-top:70px">
+  <div style="background:var(--panel);border:1px solid var(--accent);border-radius:12px;padding:18px;width:92%;max-width:440px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <b style="font-size:15px">⚙ Proxy Settings</b>
+      <button onclick="toggleCfg()" style="padding:4px 10px">✕</button>
+    </div>
+    <label style="font-size:11px;color:var(--dim)">Proxy URL</label>
+    <input id="cfgUrl" placeholder="https://yoursite.com/delta-proxy.php" style="width:100%;margin:4px 0 10px">
+    <label style="font-size:11px;color:var(--dim)">Proxy token (password from PHP file)</label>
+    <input id="cfgTok" placeholder="your $PROXY_TOKEN" style="width:100%;margin:4px 0 12px">
+    <button onclick="saveCfg()" style="width:100%;padding:12px;background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700">Save &amp; Test</button>
+    <div id="cfgMsg" style="font-size:12px;margin-top:10px;color:var(--dim)"></div>
+  </div>
+</div>
+
+<div class="warn">
+  ⚠ <b>Live trading.</b> Market data is public (direct from Delta). Balance, positions &amp; order placement route through your PHP proxy — set the proxy URL + token under ⚙ first. Never expose your API secret in this page.
+</div>
+
+<div class="grid">
+
+  <!-- LEFT: market / stats -->
+  <div>
+    <div class="card" style="margin-bottom:10px">
+      <div class="big" id="mark">—</div>
+      <div class="dim" id="markSub">mark price</div>
+      <div class="kv" style="margin-top:8px"><span class="dim">24h change</span><span class="v" id="chg">—</span></div>
+      <div class="kv"><span class="dim">24h high</span><span class="v" id="hi">—</span></div>
+      <div class="kv"><span class="dim">24h low</span><span class="v" id="lo">—</span></div>
+      <div class="kv"><span class="dim">24h volume</span><span class="v" id="vol">—</span></div>
+    </div>
+
+    <div class="card" style="margin-bottom:10px">
+      <h2>Derivatives</h2>
+      <div class="kv"><span class="dim">Open Interest</span><span class="v" id="oi">—</span></div>
+      <div class="kv"><span class="dim">Funding rate</span><span class="v" id="funding">—</span></div>
+      <div class="kv"><span class="dim">Mark vs Spot</span><span class="v" id="basis">—</span></div>
+      <div class="kv"><span class="dim">Index price</span><span class="v" id="spot">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Book Liquidity (top 20)</h2>
+      <div class="kv"><span class="dim">Bid depth</span><span class="v g" id="bidDepth">—</span></div>
+      <div class="kv"><span class="dim">Ask depth</span><span class="v r" id="askDepth">—</span></div>
+      <div class="kv"><span class="dim">Imbalance</span><span class="v" id="imb">—</span></div>
+      <div class="liq" id="liqBar"><div class="l" style="width:50%"></div><div class="s" style="width:50%"></div></div>
+    </div>
+  </div>
+
+  <!-- CENTER: orderbook + positions -->
+  <div>
+    <div class="card" style="margin-bottom:10px">
+      <h2>Order Book</h2>
+      <div class="ob" id="asks"></div>
+      <div class="spread" id="spread">—</div>
+      <div class="ob" id="bids"></div>
+    </div>
+    <div class="card">
+      <h2>Open Positions &amp; Orders</h2>
+      <div class="tabs">
+        <button class="act" onclick="posTab('pos',this)">Positions</button>
+        <button onclick="posTab('ord',this)">Open Orders</button>
+        <button onclick="posTab('bal',this)">Balance</button>
+      </div>
+      <div id="posBox"><div class="dim">Set proxy to load account data.</div></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: trade + auto -->
+  <div>
+    <div class="card" style="margin-bottom:10px">
+      <h2>Manual Trade</h2>
+      <div class="side-btns">
+        <button class="buy-btn act" id="bBuy" onclick="setSide('buy')">BUY / LONG</button>
+        <button class="sell-btn" id="bSell" onclick="setSide('sell')">SELL / SHORT</button>
+      </div>
+      <div class="fld"><label>Order type</label>
+        <select id="otype" onchange="onType()">
+          <option value="market_order">Market</option>
+          <option value="limit_order">Limit</option>
+        </select>
+      </div>
+      <div class="fld" id="priceFld" style="display:none"><label>Limit price</label>
+        <input id="price" type="number" step="any" placeholder="0.00"></div>
+      <div class="fld"><label>Size (contracts)</label>
+        <input id="size" type="number" step="1" value="1"></div>
+      <div class="fld"><label>Leverage</label>
+        <input id="lev" type="number" step="1" value="10"></div>
+      <button class="submit buy" id="submitBtn" onclick="placeOrder()">Place BUY order</button>
+      <div class="dim" style="margin-top:6px;font-size:11px" id="notional">Notional: —</div>
+    </div>
+
+    <div class="card">
+      <h2>Auto-Trade (scaffold — dry run)</h2>
+      <div class="fld"><label>Strategy trigger</label>
+        <select id="strat">
+          <option value="none">Off</option>
+          <option value="obimb">Orderbook imbalance</option>
+          <option value="funding">Funding-rate bias</option>
+          <option value="price">Price cross level</option>
+        </select>
+      </div>
+      <div class="fld"><label>Threshold / level</label>
+        <input id="stratVal" type="number" step="any" placeholder="e.g. 0.65 imbalance"></div>
+      <div class="row2">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="armed" style="width:auto"> Armed</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="live" style="width:auto"> Live (real orders)</label>
+      </div>
+      <div class="log" id="autolog" style="margin-top:8px">auto engine idle…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================= CONFIG / STATE ================= */
+const PUB = 'https://api.india.delta.exchange';   // public market data (no auth)
+let PROXY = localStorage.getItem('dx_proxy') || '';
+let PTOKEN = localStorage.getItem('dx_token') || '';
+let products = [];      // perpetual futures
+let cur = null;         // current product object
+let side = 'buy';
+let book = {bids:[],asks:[]};
+let ticker = {};
+
+/* ================= UTIL ================= */
+const $=id=>document.getElementById(id);
+// Fetch public market data. If proxy is set, route through it (avoids mobile CORS).
+async function pubGet(path,query=''){
+  if(PROXY){
+    const r=await fetch(PROXY,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({public:true,method:'GET',path,query})});
+    return r.json();
+  }
+  const r=await fetch(PUB+path+query);
+  return r.json();
+}
+const fmt=(n,d=2)=>n==null||isNaN(n)?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const log=(m)=>{const l=$('autolog');l.textContent=new Date().toLocaleTimeString()+'  '+m+'\n'+l.textContent;};
+setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString(),1000);
+
+/* ================= PUBLIC DATA ================= */
+async function loadProducts(){
+  try{
+    const j=await pubGet('/v2/products','?contract_types=perpetual_futures&states=live');
+    products=(j.result||[]).filter(p=>p.contract_type==='perpetual_futures');
+    products.sort((a,b)=>a.symbol.localeCompare(b.symbol));
+    const sel=$('symbol'); sel.innerHTML='';
+    products.forEach(p=>{const o=document.createElement('option');o.value=p.symbol;o.textContent=p.symbol;sel.appendChild(o);});
+    // default to BTCUSD if present
+    const def=products.find(p=>p.symbol==='BTCUSD')||products[0];
+    if(def){sel.value=def.symbol;selectSymbol(def.symbol);}
+    if(products.length){$('wsdot').classList.add('on');$('wstxt').textContent=products.length+' markets';}
+    else{$('wstxt').textContent='no data — set ⚙ proxy';}
+  }catch(e){log('product load failed: '+e.message);$('wstxt').textContent='data blocked — set ⚙ proxy';}
+}
+
+function selectSymbol(sym){
+  cur=products.find(p=>p.symbol===sym);
+  $('markSub').textContent=sym+' · mark price';
+  refreshAll();
+}
+
+async function loadTicker(){
+  if(!cur)return;
+  try{
+    const j=await pubGet('/v2/tickers/'+cur.symbol); ticker=j.result||{};
+    const mark=+ticker.mark_price, spot=+ticker.spot_price;
+    $('mark').textContent=fmt(mark, priceDp());
+    const ch=+ticker.change_24h; // may be fraction
+    const chPct = ch!=null ? (Math.abs(ch)<1? ch*100 : ch) : null;
+    const el=$('chg'); el.textContent=(chPct==null?'—':(chPct>0?'+':'')+fmt(chPct,2)+'%');
+    el.className='v '+(chPct>=0?'g':'r');
+    $('hi').textContent=fmt(+ticker.high, priceDp());
+    $('lo').textContent=fmt(+ticker.low, priceDp());
+    $('vol').textContent=fmt(+ticker.volume,0);
+    $('oi').textContent=fmt(+ticker.oi_value_symbol||+ticker.oi,0);
+    const fr=+ticker.funding_rate;
+    const fe=$('funding'); fe.textContent=fr!=null?fmt(fr*100,4)+'%':'—'; fe.className='v '+(fr>=0?'g':'r');
+    $('spot').textContent=fmt(spot, priceDp());
+    if(mark&&spot){const b=((mark-spot)/spot)*100;const be=$('basis');be.textContent=(b>0?'+':'')+fmt(b,3)+'%';be.className='v '+(b>=0?'g':'r');}
+    updateNotional();
+  }catch(e){/* silent */}
+}
+
+function priceDp(){ // decimals based on tick size
+  const t=cur&&cur.tick_size?+cur.tick_size:0.5;
+  return t>=1?1:(t>=0.1?2:(t>=0.01?3:4));
+}
+
+async function loadBook(){
+  if(!cur)return;
+  try{
+    const j=await pubGet('/v2/l2orderbook/'+cur.symbol); const res=j.result||{};
+    book.bids=(res.buy||[]).slice(0,20);
+    book.asks=(res.sell||[]).slice(0,20);
+    renderBook();
+  }catch(e){/* silent */}
+}
+
+function renderBook(){
+  const dp=priceDp();
+  const maxSz=Math.max(
+    ...book.bids.map(b=>+b.size),
+    ...book.asks.map(a=>+a.size),1);
+  const asksHtml=book.asks.slice().reverse().map(a=>{
+    const w=(+a.size/maxSz*100).toFixed(0);
+    return `<div class="ob-row"><div class="ob-bar sell" style="width:${w}%"></div><span class="r">${fmt(+a.price,dp)}</span><span></span><span>${fmt(+a.size,0)}</span></div>`;
+  }).join('');
+  const bidsHtml=book.bids.map(b=>{
+    const w=(+b.size/maxSz*100).toFixed(0);
+    return `<div class="ob-row"><div class="ob-bar buy" style="width:${w}%"></div><span class="g">${fmt(+b.price,dp)}</span><span></span><span>${fmt(+b.size,0)}</span></div>`;
+  }).join('');
+  $('asks').innerHTML=asksHtml; $('bids').innerHTML=bidsHtml;
+  const bb=book.bids[0]?+book.bids[0].price:0, ba=book.asks[0]?+book.asks[0].price:0;
+  if(bb&&ba){const sp=ba-bb;$('spread').textContent=`spread ${fmt(sp,dp)} (${fmt(sp/bb*100,3)}%)`;}
+
+  // liquidity
+  const bidD=book.bids.reduce((s,b)=>s+ +b.size,0);
+  const askD=book.asks.reduce((s,a)=>s+ +a.size,0);
+  $('bidDepth').textContent=fmt(bidD,0);
+  $('askDepth').textContent=fmt(askD,0);
+  const tot=bidD+askD||1; const imb=bidD/tot;
+  const ie=$('imb'); ie.textContent=fmt(imb*100,1)+'% bid'; ie.className='v '+(imb>=0.5?'g':'r');
+  $('liqBar').innerHTML=`<div class="l" style="width:${(imb*100).toFixed(0)}%"></div><div class="s" style="width:${((1-imb)*100).toFixed(0)}%"></div>`;
+  runAuto(imb);
+}
+
+function updateNotional(){
+  if(!cur)return;
+  const sz=+$('size').value||0;
+  const px=$('otype').value==='limit_order'?(+$('price').value||+ticker.mark_price):+ticker.mark_price;
+  const cv=cur.contract_value?+cur.contract_value:1;
+  const notional=sz*px*cv;
+  $('notional').textContent='Notional ≈ '+fmt(notional,2)+'  ('+cur.settling_asset?.symbol||'USDT'+')';
+}
+
+function refreshAll(){loadTicker();loadBook();}
+setInterval(refreshAll,3000);
+
+/* ================= UI ================= */
+function setSide(s){side=s;
+  $('bBuy').classList.toggle('act',s==='buy');
+  $('bSell').classList.toggle('act',s==='sell');
+  const b=$('submitBtn');
+  b.className='submit '+s;
+  b.textContent='Place '+(s==='buy'?'BUY':'SELL')+' order';
+}
+function onType(){$('priceFld').style.display=$('otype').value==='limit_order'?'block':'none';updateNotional();}
+$('symbol')?.addEventListener('change',e=>selectSymbol(e.target.value));
+['size','price'].forEach(id=>$(id)?.addEventListener('input',updateNotional));
+
+function toggleCfg(){
+  const o=$('cfgOverlay');
+  const showing=o.style.display==='flex';
+  o.style.display=showing?'none':'flex';
+  if(!showing){$('cfgUrl').value=PROXY;$('cfgTok').value=PTOKEN;}
+}
+function saveCfg(){
+  PROXY=$('cfgUrl').value.trim(); PTOKEN=$('cfgTok').value.trim();
+  localStorage.setItem('dx_proxy',PROXY); localStorage.setItem('dx_token',PTOKEN);
+  $('cfgMsg').textContent='Saved. Testing…';
+  log('proxy saved');
+  loadProducts().then(()=>{
+    $('cfgMsg').textContent = products.length ? ('✓ '+products.length+' markets loaded') : '✗ no data — check URL';
+  });
+  loadBalance();
+}
+
+/* ================= PROXY (authenticated) ================= */
+async function proxy(method,path,{query='',body=null}={}){
+  if(!PROXY){throw new Error('proxy not set');}
+  const r=await fetch(PROXY,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-Proxy-Token':PTOKEN},
+    body:JSON.stringify({method,path,query,body})
+  });
+  return r.json();
+}
+
+/* ================= ACCOUNT ================= */
+let curTab='pos';
+function posTab(t,btn){curTab=t;[...document.querySelectorAll('.tabs button')].forEach(b=>b.classList.remove('act'));btn.classList.add('act');
+  if(t==='pos')loadPositions();else if(t==='ord')loadOrders();else loadBalance();}
+
+async function loadPositions(){
+  if(!PROXY){$('posBox').innerHTML='<div class="dim">Set proxy first.</div>';return;}
+  try{
+    const j=await proxy('GET','/v2/positions/margined');
+    const rows=(j.result||[]).filter(p=>+p.size!==0);
+    if(!rows.length){$('posBox').innerHTML='<div class="dim">No open positions.</div>';return;}
+    $('posBox').innerHTML='<table><tr><th>Sym</th><th>Size</th><th>Entry</th><th>uPnL</th></tr>'+
+      rows.map(p=>`<tr><td>${p.product_symbol||p.product_id}</td><td class="${+p.size>0?'g':'r'}">${p.size}</td><td>${fmt(+p.entry_price,priceDp())}</td><td class="${+p.unrealized_pnl>=0?'g':'r'}">${fmt(+p.unrealized_pnl,2)}</td></tr>`).join('')+'</table>';
+  }catch(e){$('posBox').innerHTML='<div class="r">'+e.message+'</div>';}
+}
+async function loadOrders(){
+  if(!PROXY){$('posBox').innerHTML='<div class="dim">Set proxy first.</div>';return;}
+  try{
+    const j=await proxy('GET','/v2/orders',{query:'?state=open'});
+    const rows=j.result||[];
+    if(!rows.length){$('posBox').innerHTML='<div class="dim">No open orders.</div>';return;}
+    $('posBox').innerHTML='<table><tr><th>Sym</th><th>Side</th><th>Size</th><th>Price</th><th></th></tr>'+
+      rows.map(o=>`<tr><td>${o.product_symbol}</td><td class="${o.side==='buy'?'g':'r'}">${o.side}</td><td>${o.size}</td><td>${o.limit_price||'mkt'}</td><td><button onclick="cancelOrder(${o.id},${o.product_id})" style="padding:2px 6px">✕</button></td></tr>`).join('')+'</table>';
+  }catch(e){$('posBox').innerHTML='<div class="r">'+e.message+'</div>';}
+}
+async function loadBalance(){
+  if(!PROXY){$('posBox').innerHTML='<div class="dim">Set proxy first.</div>';return;}
+  try{
+    const j=await proxy('GET','/v2/wallet/balances');
+    const rows=(j.result||[]).filter(b=>+b.balance>0);
+    $('wsdot').classList.add('on');$('wstxt').textContent='proxy ok';
+    if(!rows.length){$('posBox').innerHTML='<div class="dim">Wallet empty.</div>';return;}
+    $('posBox').innerHTML='<table><tr><th>Asset</th><th>Balance</th><th>Available</th></tr>'+
+      rows.map(b=>`<tr><td>${b.asset_symbol||b.asset_id}</td><td>${fmt(+b.balance,4)}</td><td>${fmt(+b.available_balance,4)}</td></tr>`).join('')+'</table>';
+  }catch(e){$('posBox').innerHTML='<div class="r">'+e.message+'</div>';$('wstxt').textContent='proxy error';}
+}
+
+/* ================= ORDERS ================= */
+async function placeOrder(){
+  if(!cur)return;
+  if(!PROXY){alert('Set proxy URL + token first (⚙).');return;}
+  const size=parseInt($('size').value)||0;
+  if(size<=0){alert('size?');return;}
+  const otype=$('otype').value;
+  const body={
+    product_id:cur.id, product_symbol:cur.symbol,
+    size, side, order_type:otype
+  };
+  if(otype==='limit_order'){body.limit_price=String(+$('price').value||0);}
+  if(!confirm(`${side.toUpperCase()} ${size} ${cur.symbol} — ${otype.replace('_',' ')}. Confirm?`))return;
+  try{
+    // set leverage first (best-effort)
+    const lev=parseInt($('lev').value)||10;
+    await proxy('POST','/v2/products/'+cur.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
+    const j=await proxy('POST','/v2/orders',{body});
+    if(j.success===false){log('order rejected: '+JSON.stringify(j.error));alert('Rejected: '+JSON.stringify(j.error));}
+    else{log('order placed id='+(j.result?.id));loadPositions();}
+  }catch(e){log('order error: '+e.message);alert(e.message);}
+}
+async function cancelOrder(id,pid){
+  try{await proxy('DELETE','/v2/orders',{body:{id,product_id:pid}});log('cancelled '+id);loadOrders();}
+  catch(e){alert(e.message);}
+}
+
+/* ================= AUTO ENGINE (dry-run scaffold) ================= */
+let lastFire=0;
+function runAuto(imb){
+  if(!$('armed').checked)return;
+  const strat=$('strat').value; if(strat==='none')return;
+  const val=+$('stratVal').value;
+  const now=Date.now();
+  if(now-lastFire<10000)return; // 10s cooldown
+  let trigger=null;
+  if(strat==='obimb'){
+    if(imb>=val){trigger='buy';} else if(imb<=(1-val)){trigger='sell';}
+  }else if(strat==='funding'){
+    const fr=+ticker.funding_rate;
+    if(fr!=null){if(fr<-Math.abs(val))trigger='buy';else if(fr>Math.abs(val))trigger='sell';}
+  }else if(strat==='price'){
+    const mk=+ticker.mark_price;
+    if(mk&&val){trigger= mk>=val?'sell':'buy';}
+  }
+  if(!trigger)return;
+  lastFire=now;
+  const live=$('live').checked;
+  log(`[${strat}] signal → ${trigger.toUpperCase()} ${live?'(LIVE)':'(dry)'}  imb=${imb.toFixed(3)}`);
+  if(live){side=trigger;placeOrder();}
+}
+
+/* ================= INIT ================= */
+loadProducts();
+if(PROXY){setTimeout(loadBalance,800);}
+onType();
