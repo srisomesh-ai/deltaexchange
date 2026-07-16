@@ -34,11 +34,12 @@
   #symbol{font-weight:700;letter-spacing:.2px;background:var(--panel2)}
 
   /* layout — constrained, no wasted width */
-  .wrap{max-width:1400px;margin:0 auto;padding:14px}
-  .grid{display:grid;grid-template-columns:300px minmax(0,1fr) 340px;gap:14px;align-items:start}
+  .wrap{max-width:1240px;margin:0 auto;padding:14px}
+  .grid{display:grid;grid-template-columns:300px minmax(380px,1fr) 340px;gap:14px;align-items:start}
   @media(max-width:1100px){.grid{grid-template-columns:1fr}}
   .col{display:flex;flex-direction:column;gap:14px;min-width:0}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow)}
+  .ob-card{max-width:420px}
   .card h2{font-size:12px;font-weight:700;color:var(--txt);margin-bottom:14px;letter-spacing:-.1px;display:flex;align-items:center;justify-content:space-between}
 
   /* key-value rows */
@@ -114,7 +115,7 @@
 <body>
 
 <div class="bar">
-  <h1>🌱 Delta Trader <span class="v">v12</span></h1>
+  <h1>🌱 Delta Trader <span class="v">v13</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:12px">connecting…</span>
   <select id="symbol"></select>
   <span id="envPill" class="pill-env"></span>
@@ -176,7 +177,7 @@
 
   <!-- CENTER: orderbook + positions -->
   <div class="col">
-    <div class="card">
+    <div class="card ob-card">
       <h2>Order Book <span class="dim" style="font-weight:500">live</span></h2>
       <div class="ob-wrap">
         <div class="ob-head"><span>Price (USD)</span><span>Size</span></div>
@@ -271,6 +272,15 @@
           <div class="fld" style="margin:0"><label>Robot size</label><input id="botSize" type="number" value="1" style="padding:5px"></div>
           <div class="fld" style="margin:0"><label>Min score</label><input id="botScore" type="number" step="0.05" value="0.45" style="padding:5px"></div>
         </div>
+      </div>
+
+      <!-- ROBOT STATUS PANEL -->
+      <div id="robotStatus" style="border-radius:12px;padding:14px;margin-bottom:12px;background:var(--panel2);border:1.5px solid var(--line)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span id="rsLight" style="width:10px;height:10px;border-radius:50%;background:var(--dim);display:inline-block"></span>
+          <span id="rsState" style="font-weight:700;font-size:14px">ROBOT OFF</span>
+        </div>
+        <div id="rsDetail" style="font-size:11px;color:var(--dim);margin-top:7px;line-height:1.6">Turn on the engine and tick auto-execute to arm the robot.</div>
       </div>
 
       <div style="font-size:9px;color:var(--dim);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Journal (<span id="jCount">0</span>) · outcome tracked +60s</div>
@@ -429,7 +439,7 @@ function toggleCfg(){
 function setEnv(e){
   ENV=e; localStorage.setItem('dx_env',e);
   refreshEnvUI();
-  // reload everything under new env
+  if(typeof updateRobotStatus==='function')updateRobotStatus();
   loadProducts(); loadBalance();
   log('switched to '+e.toUpperCase());
 }
@@ -481,6 +491,11 @@ async function loadPositions(){
   try{
     const j=await proxy('GET','/v2/positions/margined');
     const rows=(j.result||[]).filter(p=>+p.size!==0);
+    // if robot had a trade and now no position on symbol, it closed
+    if(robotOpenTrade){
+      const stillOpen=(j.result||[]).some(p=>+p.size!==0 && (p.product_symbol===cur.symbol||p.product_id===cur.id));
+      if(!stillOpen){log('   🤖 position closed (SL/TP hit) — robot free to trade again');robotOpenTrade=null;updateRobotStatus();}
+    }
     // feed live PnL into the risk guard
     const totPnl=(j.result||[]).reduce((s,p)=>s+(+p.unrealized_pnl||0),0);
     if($('todayPnl'))$('todayPnl').value=totPnl.toFixed(2);
@@ -706,6 +721,46 @@ function runSignal(imb){
   lastSigDir=dir;
 }
 
+let robotOpenTrade=null;   // tracks current robot position {side,entry,size}
+function updateRobotStatus(){
+  const engineOn=$('sigOn')?.checked;
+  const autoOn=$('autoExec')?.checked;
+  const light=$('rsLight'), state=$('rsState'), detail=$('rsDetail'), box=$('robotStatus');
+  if(!light)return;
+  const size=$('botSize')?.value||1, minS=$('botScore')?.value||0.45;
+
+  if(!engineOn){
+    light.style.background='var(--dim)';
+    state.textContent='ROBOT OFF';state.style.color='var(--txt)';
+    box.style.borderColor='var(--line)';box.style.background='var(--panel2)';
+    detail.innerHTML='Engine is off. Tick <b>Engine on</b> to start watching the market.';
+    return;
+  }
+  if(engineOn && !autoOn){
+    light.style.background='var(--amber)';
+    state.textContent='WATCHING (no trades)';state.style.color='var(--amber)';
+    box.style.borderColor='#ffe4a3';box.style.background='#fff8e6';
+    detail.innerHTML='Engine is scanning &amp; logging signals but <b>will not place orders</b>. Tick auto-execute to arm.';
+    return;
+  }
+  if(ENV!=='testnet'){
+    light.style.background='var(--red)';
+    state.textContent='BLOCKED (live mode)';state.style.color='var(--red)';
+    box.style.borderColor='var(--red)';box.style.background='var(--red-bg)';
+    detail.innerHTML='Auto-execute is locked on LIVE. Switch to <b>TESTNET</b> to let the robot trade.';
+    return;
+  }
+  light.style.background='var(--green)';
+  state.textContent = robotOpenTrade ? '● IN TRADE' : '✓ ARMED & WAITING';
+  state.style.color='var(--green)';
+  box.style.borderColor='var(--green)';box.style.background='var(--green-bg)';
+  if(robotOpenTrade){
+    detail.innerHTML=`Holding <b>${robotOpenTrade.side.toUpperCase()}</b> ${robotOpenTrade.size} @ ${fmt(robotOpenTrade.entry,priceDp())} · waiting for SL/TP to close. Won't open a new trade until this exits.`;
+  }else{
+    detail.innerHTML=`Robot armed on <b>testnet</b>, size <b>${size}</b>. Waiting for a signal with score ≥ <b>${minS}</b>. Watch the gauge above.`;
+  }
+}
+
 let botBusy=false;   // prevents overlap while checking/placing
 async function maybeAutoExecute(dir, score, mark){
   const ae=$('autoExec');
@@ -737,7 +792,12 @@ async function maybeAutoExecute(dir, score, mark){
     await proxy('POST','/v2/products/'+cur.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
     const j=await proxy('POST','/v2/orders',{body});
     if(j.success===false){log('   🤖✗ rejected: '+JSON.stringify(j.error));}
-    else{log(`   🤖✓ ${botSide.toUpperCase()} ${size} @mkt  SL ${sl} TP ${tp}  id=${j.result?.id}`);loadPositions();}
+    else{
+      robotOpenTrade={side:botSide,entry:mark,size};
+      log(`   🤖✓ ${botSide.toUpperCase()} ${size} @mkt  SL ${sl} TP ${tp}  id=${j.result?.id}`);
+      updateRobotStatus();
+      loadPositions();
+    }
   }catch(e){log('   🤖 error: '+e.message);}
   botBusy=false;
 }
@@ -765,6 +825,34 @@ window.toggleCfg=toggleCfg; window.saveCfg=saveCfg; window.placeOrder=placeOrder
 window.setSide=setSide; window.onType=onType; window.posTab=posTab;
 window.cancelOrder=cancelOrder; window.exportJournal=exportJournal; window.setEnv=setEnv;
 refreshEnvUI();
+
+// robot status wiring + confirmations
+$('sigOn')?.addEventListener('change',()=>{
+  updateRobotStatus();
+  if($('sigOn').checked)log('✓ engine ON — watching market');
+  else log('engine OFF');
+});
+$('autoExec')?.addEventListener('change',()=>{
+  if($('autoExec').checked){
+    if(ENV!=='testnet'){
+      alert('Auto-execute is locked on LIVE.\nSwitch to TESTNET first to let the robot trade with fake money.');
+      $('autoExec').checked=false;
+    }else if(!$('sigOn').checked){
+      alert('Turn the Engine ON first, then arm auto-execute.');
+      $('autoExec').checked=false;
+    }else{
+      const size=$('botSize').value, minS=$('botScore').value;
+      const ok=confirm(`ARM THE ROBOT?\n\nEnvironment: TESTNET (fake money)\nSize: ${size} contracts\nMin score to fire: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\n\nThe robot will place real testnet orders automatically when a strong signal appears. One position at a time.\n\nConfirm to arm?`);
+      if(ok)log('🤖 ROBOT ARMED — waiting for signal');
+      else $('autoExec').checked=false;
+    }
+  }else{
+    log('🤖 robot disarmed');
+  }
+  updateRobotStatus();
+});
+['botSize','botScore'].forEach(id=>$(id)?.addEventListener('input',updateRobotStatus));
+updateRobotStatus();
 loadProducts();
 if(PROXY){setTimeout(loadBalance,800);}
 onType();
