@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Somu Trader — Delta Exchange</title>
+<meta name="theme-color" content="#1a2b4a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Somu Trader">
+<link rel="manifest" href="data:application/json,%7B%22name%22%3A%22Somu%20Trader%22%2C%22short_name%22%3A%22Somu%20Trader%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%231a2b4a%22%2C%22theme_color%22%3A%22%231a2b4a%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22https%3A%2F%2Fapi.iconify.design%2Fmdi%2Fchart-line.svg%3Fcolor%3D%2523c8a24a%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -423,6 +428,7 @@ const log=(m)=>{
     hist.unshift(line);
     hist=hist.slice(0,200);
     localStorage.setItem('dx_log',hist.join('\n'));
+    if(typeof cloudSaveSoon==='function')cloudSaveSoon();
   }catch(e){}
 };
 // restore log on load
@@ -599,6 +605,11 @@ function saveCfg(){
     $('cfgMsg').textContent = products.length ? ('✓ '+products.length+' markets loaded') : '✗ no data — check URL';
   });
   loadBalance();
+  // pull any settings saved from another device, then restore log
+  cloudLoad().then(loaded=>{
+    if(loaded){try{const h=localStorage.getItem('dx_log');if(h)$('autolog').textContent=h;}catch(e){}
+      $('cfgMsg').textContent+=' · settings synced';}
+  });
 }
 
 /* ================= PROXY (authenticated) ================= */
@@ -611,6 +622,42 @@ async function proxy(method,path,{query='',body=null}={}){
   });
   return r.json();
 }
+
+/* ================= CLOUD SYNC (phone + PC share settings) ================= */
+// gathers all dx_set_* settings + toggles + log into one blob
+function gatherSettings(){
+  const s={};
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(k.startsWith('dx_set_')||['dx_engineOn','dx_env','dx_log'].includes(k))s[k]=localStorage.getItem(k);
+  }
+  return s;
+}
+let syncTimer=null;
+async function cloudSave(){
+  if(!PROXY||!PTOKEN)return;
+  try{
+    await fetch(PROXY,{method:'POST',headers:{'Content-Type':'application/json','X-Proxy-Token':PTOKEN},
+      body:JSON.stringify({sync:'save',data:gatherSettings()})});
+  }catch(e){}
+}
+// debounced save — call after any setting change
+function cloudSaveSoon(){clearTimeout(syncTimer);syncTimer=setTimeout(cloudSave,1500);}
+async function cloudLoad(){
+  if(!PROXY||!PTOKEN)return false;
+  try{
+    const r=await fetch(PROXY,{method:'POST',headers:{'Content-Type':'application/json','X-Proxy-Token':PTOKEN},
+      body:JSON.stringify({sync:'load'})});
+    const j=await r.json();
+    if(j.success&&j.data){
+      Object.entries(j.data).forEach(([k,v])=>{if(v!=null)localStorage.setItem(k,v);});
+      log('☁ settings loaded from server');
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+window.cloudSave=cloudSave;window.cloudLoad=cloudLoad;
 
 /* ================= ACCOUNT ================= */
 function posTab(t,btn){curTab=t;[...document.querySelectorAll('.tabs button')].forEach(b=>b.classList.remove('act'));btn.classList.add('act');
@@ -1294,8 +1341,8 @@ $('autoExec')?.addEventListener('change',()=>{
   const saved=localStorage.getItem('dx_set_'+id);
   if(saved!==null && saved!=='')el.value=saved;
   // save on change
-  el.addEventListener('input',()=>{localStorage.setItem('dx_set_'+id,el.value);updateSizeCalc();updateRobotStatus();});
-  el.addEventListener('change',()=>{localStorage.setItem('dx_set_'+id,el.value);updateSizeCalc();});
+  el.addEventListener('input',()=>{localStorage.setItem('dx_set_'+id,el.value);updateSizeCalc();updateRobotStatus();cloudSaveSoon();});
+  el.addEventListener('change',()=>{localStorage.setItem('dx_set_'+id,el.value);updateSizeCalc();cloudSaveSoon();});
 });
 // restore engine/auto toggles (but NOT auto-arm silently — see note)
 if(localStorage.getItem('dx_engineOn')==='1'){const s=$('sigOn');if(s){s.checked=true;}}

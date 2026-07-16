@@ -101,6 +101,29 @@ if (!hash_equals($PROXY_TOKEN, $hdrToken)) {
     exit;
 }
 
+// ---- SETTINGS SYNC (cross-device): save/load a JSON blob server-side ----
+// Dashboard sends {"sync":"save","data":{...}} or {"sync":"load"}
+// Stored in a file next to this proxy so phone & PC share the same settings.
+if (!empty($req['sync'])) {
+    $syncFile = __DIR__ . '/somu-settings.json';
+    if ($req['sync'] === 'save') {
+        $blob = json_encode($req['data'] ?? new stdClass());
+        $ok = @file_put_contents($syncFile, $blob) !== false;
+        echo json_encode(['success' => $ok]);
+        exit;
+    }
+    if ($req['sync'] === 'load') {
+        if (is_file($syncFile)) {
+            echo json_encode(['success' => true, 'data' => json_decode(@file_get_contents($syncFile), true)]);
+        } else {
+            echo json_encode(['success' => true, 'data' => null]);
+        }
+        exit;
+    }
+    echo json_encode(['success' => false, 'error' => 'bad sync op']);
+    exit;
+}
+
 $method  = strtoupper($req['method'] ?? 'GET');       // GET / POST / PUT / DELETE
 $path    = $req['path']   ?? '';                       // e.g. /v2/orders
 $query   = $req['query']  ?? '';                       // e.g. ?product_id=27&state=open  (include leading ?)
