@@ -70,10 +70,10 @@
 <body>
 
 <div class="bar">
-  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v3</span></h1>
+  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v4</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim" id="wstxt">connecting…</span>
   <select id="symbol"></select>
-  <button onclick="toggleCfg()">⚙ Proxy</button>
+  <button id="proxyBtn" onclick="toggleCfg()" style="position:relative;z-index:10">⚙ Proxy</button>
   <span style="margin-left:auto" class="dim" id="clock"></span>
 </div>
 
@@ -447,6 +447,11 @@ function runAuto(imb){
 }
 
 /* ================= INIT ================= */
+// Belt-and-suspenders: bind buttons in JS too, in case inline onclick is blocked
+document.getElementById('proxyBtn')?.addEventListener('click',toggleCfg);
+window.toggleCfg=toggleCfg; window.saveCfg=saveCfg; window.placeOrder=placeOrder;
+window.setSide=setSide; window.onType=onType; window.posTab=posTab;
+window.cancelOrder=cancelOrder;
 loadProducts();
 if(PROXY){setTimeout(loadBalance,800);}
 onType();
