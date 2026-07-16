@@ -70,7 +70,7 @@
 <body>
 
 <div class="bar">
-  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v8</span></h1>
+  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v9</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim" id="wstxt">connecting…</span>
   <select id="symbol"></select>
   <button id="proxyBtn" onclick="toggleCfg()" style="position:relative;z-index:10">⚙ Proxy</button>
@@ -188,22 +188,26 @@
     </div>
 
     <div class="card">
-      <h2>Auto-Trade (scaffold — dry run)</h2>
-      <div class="fld"><label>Strategy trigger</label>
-        <select id="strat">
-          <option value="none">Off</option>
-          <option value="obimb">Orderbook imbalance</option>
-          <option value="funding">Funding-rate bias</option>
-          <option value="price">Price cross level</option>
-        </select>
+      <h2>🤖 Signal Engine (observe &amp; log)</h2>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:8px">Watches OI, orderbook, momentum &amp; funding. Flashes + journals signals. Places NO orders — this is the data-gathering brain.</div>
+
+      <div id="signalNow" style="text-align:center;padding:14px;border-radius:8px;background:var(--bg);margin-bottom:10px">
+        <div style="font-size:22px;font-weight:700" id="sigDir">NEUTRAL</div>
+        <div class="dim" style="font-size:11px" id="sigScore">score 0</div>
       </div>
-      <div class="fld"><label>Threshold / level</label>
-        <input id="stratVal" type="number" step="any" placeholder="e.g. 0.65 imbalance"></div>
-      <div class="row2">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="armed" style="width:auto"> Armed</label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="live" style="width:auto"> Live (real orders)</label>
+
+      <div class="kv"><span class="dim">OB imbalance</span><span class="v" id="sOb">—</span></div>
+      <div class="kv"><span class="dim">Momentum (30s)</span><span class="v" id="sMom">—</span></div>
+      <div class="kv"><span class="dim">OI trend</span><span class="v" id="sOi">—</span></div>
+      <div class="kv"><span class="dim">Funding bias</span><span class="v" id="sFund">—</span></div>
+
+      <div style="display:flex;gap:8px;margin:10px 0">
+        <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="sigOn" style="width:auto"> Engine on</label>
+        <button onclick="exportJournal()" style="padding:6px 10px;font-size:12px">⬇ Export journal</button>
       </div>
-      <div class="log" id="autolog" style="margin-top:8px">auto engine idle…</div>
+
+      <div style="font-size:10px;color:var(--dim);margin-bottom:4px">SIGNAL JOURNAL (<span id="jCount">0</span>) — outcome tracked 60s after each</div>
+      <div class="log" id="autolog" style="max-height:160px">engine idle…</div>
     </div>
   </div>
 </div>
@@ -319,7 +323,7 @@ function renderBook(){
   const tot=bidD+askD||1; const imb=bidD/tot;
   const ie=$('imb'); ie.textContent=fmt(imb*100,1)+'% bid'; ie.className='v '+(imb>=0.5?'g':'r');
   $('liqBar').innerHTML=`<div class="l" style="width:${(imb*100).toFixed(0)}%"></div><div class="s" style="width:${((1-imb)*100).toFixed(0)}%"></div>`;
-  runAuto(imb);
+  runSignal(imb);
 }
 
 function updateNotional(){
@@ -516,28 +520,99 @@ async function cancelOrder(id,pid){
 }
 
 /* ================= AUTO ENGINE (dry-run scaffold) ================= */
-let lastFire=0;
-function runAuto(imb){
-  if(!$('armed').checked)return;
-  const strat=$('strat').value; if(strat==='none')return;
-  const val=+$('stratVal').value;
+/* ================= SIGNAL ENGINE (observe & log, no orders) ================= */
+let priceHist=[];     // {t, mark}
+let oiHist=[];        // {t, oi}
+let journal=[];       // logged signals
+let lastSigDir='NEUTRAL';
+let lastSigFire=0;
+
+function pushHist(mark,oi){
+  const t=Date.now();
+  if(mark){priceHist.push({t,mark});priceHist=priceHist.filter(x=>t-x.t<=120000);}
+  if(oi){oiHist.push({t,oi});oiHist=oiHist.filter(x=>t-x.t<=120000);}
+}
+// value from N ms ago
+function valAgo(arr,ms,key){
+  const cutoff=Date.now()-ms;
+  const old=arr.filter(x=>x.t<=cutoff).pop() || arr[0];
+  return old? old[key] : null;
+}
+
+function runSignal(imb){
+  // always update history + component displays
+  const mark=+ticker.mark_price;
+  const oi=+(ticker.oi_value_symbol||ticker.oi||0);
+  pushHist(mark,oi);
+
+  // --- component scores, each -1..+1 ---
+  // 1. orderbook imbalance: 0.5 neutral → map to -1..1
+  const obScore=Math.max(-1,Math.min(1,(imb-0.5)*4));   // 0.75 bid → +1
+  // 2. momentum: price now vs 30s ago, in %
+  const p30=valAgo(priceHist,30000,'mark');
+  const momPct=(p30&&mark)?((mark-p30)/p30*100):0;
+  const momScore=Math.max(-1,Math.min(1,momPct/0.15));  // 0.15% move → full
+  // 3. OI trend: rising OI + rising price = conviction long; use OI delta sign * price dir
+  const oi30=valAgo(oiHist,30000,'oi');
+  const oiDelta=(oi30&&oi)?((oi-oi30)/oi30):0;
+  const oiScore=Math.max(-1,Math.min(1, (oiDelta*100) * Math.sign(momPct||1) ));
+  // 4. funding bias: high +funding = crowded longs = fade short; invert
+  const fr=+ticker.funding_rate||0;
+  const fundScore=Math.max(-1,Math.min(1, -fr*2000 ));  // small numbers, scale
+
+  // composite (weights)
+  const score = obScore*0.4 + momScore*0.3 + oiScore*0.2 + fundScore*0.1;
+
+  // display components
+  $('sOb').textContent=obScore.toFixed(2); $('sOb').className='v '+(obScore>=0?'g':'r');
+  $('sMom').textContent=(momPct>=0?'+':'')+momPct.toFixed(3)+'%'; $('sMom').className='v '+(momPct>=0?'g':'r');
+  $('sOi').textContent=(oiDelta>=0?'+':'')+(oiDelta*100).toFixed(2)+'%'; $('sOi').className='v '+(oiDelta>=0?'g':'r');
+  $('sFund').textContent=(fr*100).toFixed(4)+'%'; $('sFund').className='v '+(fr<=0?'g':'r');
+
+  const dir = score>0.35?'LONG' : score<-0.35?'SHORT' : 'NEUTRAL';
+  const col = dir==='LONG'?'var(--green)':dir==='SHORT'?'var(--red)':'var(--dim)';
+  $('sigDir').textContent=dir; $('sigDir').style.color=col;
+  $('sigScore').textContent='score '+score.toFixed(2);
+  $('signalNow').style.boxShadow = dir!=='NEUTRAL'?`inset 0 0 0 2px ${col}`:'none';
+
+  if(!$('sigOn')?.checked) return;
+
+  // fire a journal entry when dir flips to a directional signal, min 20s apart
   const now=Date.now();
-  if(now-lastFire<10000)return; // 10s cooldown
-  let trigger=null;
-  if(strat==='obimb'){
-    if(imb>=val){trigger='buy';} else if(imb<=(1-val)){trigger='sell';}
-  }else if(strat==='funding'){
-    const fr=+ticker.funding_rate;
-    if(fr!=null){if(fr<-Math.abs(val))trigger='buy';else if(fr>Math.abs(val))trigger='sell';}
-  }else if(strat==='price'){
-    const mk=+ticker.mark_price;
-    if(mk&&val){trigger= mk>=val?'sell':'buy';}
+  if(dir!=='NEUTRAL' && dir!==lastSigDir && now-lastSigFire>20000){
+    lastSigFire=now;
+    const entry={
+      time:new Date().toLocaleTimeString(),
+      ts:now, symbol:cur.symbol, dir, score:+score.toFixed(2),
+      entryPx:mark, ob:+obScore.toFixed(2), mom:+momPct.toFixed(3),
+      oi:+(oiDelta*100).toFixed(2), fund:+(fr*100).toFixed(4),
+      outcome:null
+    };
+    journal.push(entry);
+    $('jCount').textContent=journal.length;
+    log(`▶ ${dir} @ ${fmt(mark,priceDp())}  score=${score.toFixed(2)} [ob${obScore.toFixed(1)} mo${momPct.toFixed(2)} oi${(oiDelta*100).toFixed(1)} fu${(fr*100).toFixed(3)}]`);
+    // check outcome 60s later
+    setTimeout(()=>{
+      const px=+ticker.mark_price;
+      const move=((px-entry.entryPx)/entry.entryPx*100);
+      const good = (dir==='LONG'&&move>0)||(dir==='SHORT'&&move<0);
+      entry.outcome={movePct:+move.toFixed(3), win:good};
+      log(`   └ 60s: ${(move>=0?'+':'')}${move.toFixed(3)}%  ${good?'✓ win':'✗ lose'}  (${dir})`);
+    },60000);
   }
-  if(!trigger)return;
-  lastFire=now;
-  const live=$('live').checked;
-  log(`[${strat}] signal → ${trigger.toUpperCase()} ${live?'(LIVE)':'(dry)'}  imb=${imb.toFixed(3)}`);
-  if(live){side=trigger;placeOrder();}
+  lastSigDir=dir;
+}
+
+function exportJournal(){
+  if(!journal.length){alert('Journal empty — turn the engine on and let it run.');return;}
+  const hdr='time,symbol,dir,score,entryPx,ob,mom%,oiDelta%,fund%,outcome_move%,win\n';
+  const rows=journal.map(e=>[e.time,e.symbol,e.dir,e.score,e.entryPx,e.ob,e.mom,e.oi,e.fund,
+    e.outcome?e.outcome.movePct:'',e.outcome?(e.outcome.win?1:0):''].join(',')).join('\n');
+  const blob=new Blob([hdr+rows],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='signal-journal-'+Date.now()+'.csv';
+  a.click();
 }
 
 /* ================= INIT ================= */
@@ -549,7 +624,7 @@ document.getElementById('proxyBtn')?.addEventListener('click',toggleCfg);
 document.getElementById('saveCfgBtn')?.addEventListener('click',saveCfg);
 window.toggleCfg=toggleCfg; window.saveCfg=saveCfg; window.placeOrder=placeOrder;
 window.setSide=setSide; window.onType=onType; window.posTab=posTab;
-window.cancelOrder=cancelOrder;
+window.cancelOrder=cancelOrder; window.exportJournal=exportJournal;
 loadProducts();
 if(PROXY){setTimeout(loadBalance,800);}
 onType();
