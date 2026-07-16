@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>◆ AURUM — AI Trading Core v23</title>
+<title>◆ AURUM — AI Trading Core v24</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -163,7 +163,7 @@
 </head>
 <body>
 <div class="topbar">
-  <div class="brand">◆ AURUM <span class="v">CORE v23</span></div>
+  <div class="brand">◆ AURUM <span class="v">CORE v24</span></div>
   <span class="dot" id="wsdot"></span><span class="dim mono" id="wstxt" style="font-size:11px">connecting…</span>
   <select id="symbol" style="max-width:150px"></select>
   <span id="envPill" class="pill-env"></span>
@@ -322,6 +322,15 @@
         <div class="fld"><label>Min strength</label><input id="botScore" type="number" step="0.05" value="0.30"></div>
       </div>
       <div class="fld"><label>Cooldown (minutes)</label><input id="botCooldown" type="number" step="1" value="3"></div>
+      <div style="border-top:1px solid var(--edge);margin:12px 0 10px;padding-top:12px">
+        <div class="switch" style="border:0;padding:0 0 8px">
+          <label style="font-size:11px">⤴ Trailing profit-lock</label>
+          <div class="toggle" id="tglTrail" onclick="toggleSwitch('trailOn',this)"></div>
+        </div>
+        <input type="checkbox" id="trailOn" class="hidden">
+        <div class="fld" style="margin:0"><label>Step size % (SL climbs, TP extends each step)</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
+        <div style="font-size:10px;color:var(--dim);margin-top:6px;line-height:1.5">Each time price advances one step your way, the stop jumps up to lock profit and the target pushes further out. The trade rides the move and exits on the trailing stop.</div>
+      </div>
       <input id="botSize" type="hidden" value="1">
       <div id="sizeCalc" class="mono" style="font-size:10px;color:var(--dim);margin-top:2px"></div>
     </div>
@@ -557,6 +566,7 @@ function refreshAll(){
     else if(curTab==='bal')loadBalance();
   }
   if(typeof updateRobotStatus==='function')updateRobotStatus();
+  if(typeof trailMonitor==='function')trailMonitor();
 }
 setInterval(refreshAll,3000);
 
@@ -954,6 +964,47 @@ function runSignal(imb){
 }
 
 let robotOpenTrade=null;   // tracks current robot position {side,entry,size}
+
+// ===== STEPPED TRAILING STOP + MOVING TP =====
+let trailBusy=false;
+async function trailMonitor(){
+  if(!$('trailOn')?.checked) return;
+  if(!robotOpenTrade || !robotOpenTrade.prodId) return;
+  if(trailBusy) return;
+  const tr=robotOpenTrade;
+  const px = +ticker.mark_price || 0;
+  if(!px) return;
+  const isBuy = tr.side==='buy';
+  const stepFrac = (tr.stepPct||tr.slP||0.3)/100;
+  const step = tr.entry*stepFrac;                 // price distance of one step
+  const favMove = isBuy ? (px - tr.entry) : (tr.entry - px);
+  const stepsNow = Math.floor(favMove/step);
+  if(stepsNow <= tr.steps) return;                // no new step cleared
+  trailBusy=true;
+  try{
+    const gained = stepsNow - tr.steps;
+    tr.steps = stepsNow;
+    const rnd = v => {const t=tr.tick||0.5; const dp=String(t).includes('.')?String(t).split('.')[1].length:0; return (Math.round(v/t)*t).toFixed(dp);};
+    const newSL = isBuy ? +tr.curSL + gained*step : +tr.curSL - gained*step;
+    const newTP = isBuy ? +tr.curTP + gained*step : +tr.curTP - gained*step;
+    tr.curSL = +rnd(newSL); tr.curTP = +rnd(newTP);
+    const body={
+      product_id:tr.prodId,
+      bracket_stop_loss_price:String(tr.curSL), bracket_stop_loss_limit_price:String(tr.curSL),
+      bracket_take_profit_price:String(tr.curTP), bracket_take_profit_limit_price:String(tr.curTP),
+      bracket_stop_trigger_method:'mark_price'
+    };
+    const jr=await proxy('POST','/v2/orders/bracket',{body});
+    if(jr.success===false){
+      log('   ⤴ trail edit note: '+JSON.stringify(jr.error?.code||jr.error));
+    }else{
+      const lockedProfit = isBuy ? (tr.curSL - tr.entry) : (tr.entry - tr.curSL);
+      log(`   ⤴ TRAIL step ${tr.steps}: SL→${tr.curSL}  TP→${tr.curTP}  ${lockedProfit>0?'🔒 locked +'+fmt(lockedProfit,priceDp()):'breakeven'}`);
+      updateRobotStatus();
+    }
+  }catch(e){log('   ⤴ trail error: '+e.message);}
+  trailBusy=false;
+}
 function updateRobotStatus(){
   if(typeof renderCore==='function')renderCore();
   if(typeof syncToggles==='function')syncToggles();
@@ -989,7 +1040,14 @@ function updateRobotStatus(){
   state.style.color='var(--green)';
   box.style.borderColor='var(--green)';box.style.background='var(--green-bg)';
   if(robotOpenTrade){
-    detail.innerHTML=`<b style="font-size:13px;color:var(--txt)">Trading: ${robotOpenTrade.sym||cur.symbol}</b><br>Holding <b>${robotOpenTrade.side.toUpperCase()}</b> ${robotOpenTrade.size} @ ${fmt(robotOpenTrade.entry,priceDp())} · waiting for SL/TP. Won't open another until this closes.`;
+    const t=robotOpenTrade;
+    let trailTxt='';
+    if($('trailOn')?.checked && t.curSL){
+      const isBuy=t.side==='buy';
+      const locked=isBuy?(t.curSL-t.entry):(t.entry-t.curSL);
+      trailTxt=`<br><span style="color:var(--gold)">⤴ SL ${t.curSL} · TP ${t.curTP} · step ${t.steps||0}</span> ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
+    }
+    detail.innerHTML=`<b style="font-size:13px;color:var(--txt)">Trading: ${t.sym||cur.symbol}</b><br>Holding <b>${t.side.toUpperCase()}</b> ${t.size} @ ${fmt(t.entry,priceDp())}${trailTxt}`;
   }else{
     const nextPick=lastScan.find(c=>c.dir!=='—' && c.strength>=(+($('botScore').value||0.45)));
     const willTrade = nextPick ? `<b style="font-size:14px;color:var(--green)">Will trade: ${nextPick.sym} ${nextPick.dir}</b>` : `<span style="color:var(--dim)">Scanning for a coin above min strength…</span>`;
@@ -1133,10 +1191,14 @@ async function robotTick(){
     const jr=await proxy('POST','/v2/orders',{body});
     if(jr.success===false){log('🤖✗ '+pick.sym+' rejected: '+JSON.stringify(jr.error));}
     else{
-      robotOpenTrade={side:botSide,entry:mark,size,sym:pick.sym};
+      robotOpenTrade={side:botSide,entry:mark,size,sym:pick.sym,
+        prodId:prod.id, tick, slP, tpP,
+        curSL:+sl, curTP:+tp, steps:0, lastStepPrice:mark,
+        stepPct:(+$('trailStep')?.value||slP)};   // step size % (defaults to SL%)
       lastTradeTime=Date.now();
       recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);  // avoid last 3 coins
       log(`🤖✓ ${botSide.toUpperCase()} ${size} ${pick.sym} @${fmt(mark,priceDp())}  SL ${sl} TP ${tp}  (strength ${(pick.strength*100).toFixed(0)})`);
+      if($('trailOn')?.checked)log('   ⤴ trailing armed — step '+((+$('trailStep')?.value||slP))+'%');
       updateRobotStatus();
       loadPositions();
     }
@@ -1249,7 +1311,7 @@ $('autoExec')?.addEventListener('change',()=>{
   }
   updateRobotStatus();
 });
-['botPct','botScore','slPct','tpPct','lev','sizeMode','dailyLimit','botCooldown'].forEach(id=>{
+['botPct','botScore','slPct','tpPct','lev','sizeMode','dailyLimit','botCooldown','trailStep'].forEach(id=>{
   const el=$(id); if(!el)return;
   // restore saved value
   const saved=localStorage.getItem('dx_set_'+id);
