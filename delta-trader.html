@@ -9,147 +9,187 @@
 <title>Delta Trader — Perpetual Futures</title>
 <style>
   :root{
-    --bg:#0a0e14; --panel:#111722; --panel2:#161d2b; --line:#1e2839;
-    --txt:#d6deeb; --dim:#7b8aa3; --green:#16c784; --red:#ea3943;
-    --accent:#3b82f6; --amber:#f0b429;
+    --bg:#080b10; --panel:#0d1219; --panel2:#121924; --line:#1b2534;
+    --txt:#c8d2e0; --dim:#5f7086; --green:#26d97f; --red:#ff4d5e;
+    --accent:#4a9eff; --amber:#ffb020;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,'Cascadia Code',Menlo,Consolas,monospace;
+    --sans:'Inter',-apple-system,'Segoe UI',Roboto,sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--txt);font:13px/1.4 -apple-system,Segoe UI,Roboto,sans-serif}
-  .bar{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
-  .bar h1{font-size:15px;font-weight:700;letter-spacing:.3px}
-  .bar .dot{width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block}
-  .bar .dot.on{background:var(--green)}
-  select,input,button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font-size:13px}
-  button{cursor:pointer}
+  body{background:var(--bg);color:var(--txt);font:12px/1.4 var(--sans);-webkit-font-smoothing:antialiased}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
+
+  /* top bar */
+  .bar{display:flex;align-items:center;gap:14px;padding:0 16px;height:46px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .bar h1{font-size:13px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;display:flex;align-items:center;gap:7px}
+  .bar h1 .v{font-size:9px;color:var(--dim);font-weight:400;letter-spacing:0}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--red);display:inline-block;box-shadow:0 0 6px var(--red)}
+  .dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+  select,input,button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:4px;padding:6px 9px;font-size:12px;font-family:var(--sans)}
+  select,input{font-family:var(--mono)}
+  button{cursor:pointer;transition:border-color .12s,background .12s}
   button:hover{border-color:var(--accent)}
-  .grid{display:grid;grid-template-columns:280px 1fr 320px;gap:10px;padding:10px}
-  @media(max-width:1100px){.grid{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
-  .card h2{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin-bottom:10px}
-  .kv{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}
-  .kv:last-child{border:0}
-  .kv .v{font-variant-numeric:tabular-nums;font-weight:600}
+  #symbol{font-weight:600;letter-spacing:.5px}
+
+  /* layout */
+  .grid{display:grid;grid-template-columns:260px minmax(0,1fr) 300px;gap:1px;background:var(--line);padding:1px}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr;gap:1px}}
+  .col{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .card{background:var(--panel);padding:13px 14px}
+  .card h2{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);margin-bottom:11px;font-weight:600;display:flex;align-items:center;gap:6px}
+  .card h2::before{content:'';width:3px;height:10px;background:var(--accent);border-radius:1px;opacity:.5}
+
+  /* key-value rows */
+  .kv{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:12px}
+  .kv+.kv{border-top:1px solid rgba(27,37,52,.5)}
+  .kv .lbl{color:var(--dim);font-size:11px}
+  .kv .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:500;letter-spacing:-.2px}
   .g{color:var(--green)} .r{color:var(--red)} .dim{color:var(--dim)}
-  .big{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
-  .ob{font-variant-numeric:tabular-nums;font-size:12px}
-  .ob-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;padding:2px 4px;position:relative;z-index:1}
-  .ob-row span:nth-child(2){text-align:center;color:var(--dim)}
-  .ob-row span:nth-child(3){text-align:right}
-  .ob-bar{position:absolute;top:0;bottom:0;right:0;z-index:0;opacity:.14}
+
+  /* price hero */
+  .price-hero{padding:2px 0 8px}
+  .big{font-size:28px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-1px;line-height:1}
+  .price-sub{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-top:3px}
+
+  /* order book — compact */
+  .ob{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11px}
+  .ob-head{display:grid;grid-template-columns:1fr 1fr;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px;padding:0 6px 5px;border-bottom:1px solid var(--line)}
+  .ob-head span:last-child{text-align:right}
+  .ob-row{display:grid;grid-template-columns:1fr 1fr;padding:2.5px 6px;position:relative;z-index:1;line-height:1.35}
+  .ob-row .px{font-weight:500}
+  .ob-row .sz{text-align:right;color:var(--dim)}
+  .ob-bar{position:absolute;top:0;bottom:0;right:0;z-index:-1;opacity:.10;border-radius:2px 0 0 2px}
   .ob-bar.buy{background:var(--green)} .ob-bar.sell{background:var(--red)}
-  .spread{text-align:center;padding:6px;color:var(--amber);font-weight:700;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:4px 0}
-  .tabs{display:flex;gap:6px;margin-bottom:10px}
-  .tabs button{flex:1;padding:6px;font-size:12px}
-  .tabs button.act{background:var(--accent);border-color:var(--accent);color:#fff}
-  .side-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
-  .side-btns button{padding:10px;font-weight:700}
-  .buy-btn{background:rgba(22,199,132,.15);border-color:var(--green);color:var(--green)}
-  .buy-btn.act{background:var(--green);color:#fff}
-  .sell-btn{background:rgba(234,57,67,.15);border-color:var(--red);color:var(--red)}
-  .sell-btn.act{background:var(--red);color:#fff}
+  .spread{text-align:center;padding:5px;color:var(--amber);font-weight:600;font-family:var(--mono);font-size:11px;letter-spacing:.5px;background:var(--panel2);margin:3px 0}
+
+  /* tabs */
+  .tabs{display:flex;gap:1px;margin-bottom:11px;background:var(--line);border-radius:5px;padding:1px}
+  .tabs button{flex:1;padding:6px;font-size:11px;border:0;border-radius:4px;background:var(--panel2);color:var(--dim)}
+  .tabs button.act{background:var(--accent);color:#fff;font-weight:600}
+
+  /* trade side buttons */
+  .side-btns{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px}
+  .side-btns button{padding:11px;font-weight:700;font-size:12px;letter-spacing:.5px;border-radius:5px}
+  .buy-btn{background:rgba(38,217,127,.10);border-color:rgba(38,217,127,.4);color:var(--green)}
+  .buy-btn.act{background:var(--green);color:#04140c;border-color:var(--green)}
+  .sell-btn{background:rgba(255,77,94,.10);border-color:rgba(255,77,94,.4);color:var(--red)}
+  .sell-btn.act{background:var(--red);color:#1a0407;border-color:var(--red)}
+
   .fld{margin-bottom:8px}
-  .fld label{display:block;font-size:11px;color:var(--dim);margin-bottom:3px}
+  .fld label{display:block;font-size:10px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
   .fld input,.fld select{width:100%}
-  .submit{width:100%;padding:12px;font-weight:700;font-size:14px;margin-top:4px}
-  .submit.buy{background:var(--green);border-color:var(--green);color:#fff}
-  .submit.sell{background:var(--red);border-color:var(--red);color:#fff}
-  table{width:100%;border-collapse:collapse;font-size:12px}
-  th,td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
-  th{color:var(--dim);font-weight:600;font-size:10px;text-transform:uppercase}
-  .log{font:11px/1.5 monospace;color:var(--dim);max-height:120px;overflow:auto;background:var(--bg);border-radius:6px;padding:8px}
-  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .liq{display:flex;gap:4px;height:26px;border-radius:5px;overflow:hidden;margin-top:6px}
+  .submit{width:100%;padding:12px;font-weight:700;font-size:13px;letter-spacing:.5px;margin-top:4px;border-radius:5px}
+  .submit.buy{background:var(--green);border-color:var(--green);color:#04140c}
+  .submit.sell{background:var(--red);border-color:var(--red);color:#1a0407}
+
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  th,td{text-align:left;padding:5px 4px;border-bottom:1px solid rgba(27,37,52,.5);font-family:var(--mono);font-variant-numeric:tabular-nums}
+  th{color:var(--dim);font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:.5px;font-family:var(--sans)}
+
+  .log{font:10.5px/1.6 var(--mono);color:var(--dim);max-height:150px;overflow:auto;background:var(--bg);border-radius:4px;padding:8px;border:1px solid var(--line)}
+  .log::-webkit-scrollbar{width:5px}.log::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+
+  /* liquidity bar */
+  .liq{display:flex;height:5px;border-radius:3px;overflow:hidden;margin-top:8px;background:var(--panel2)}
   .liq .l{background:var(--green)} .liq .s{background:var(--red)}
-  .pill{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700}
-  .warn{background:rgba(240,180,41,.12);border:1px solid var(--amber);color:var(--amber);border-radius:8px;padding:8px 10px;font-size:11px;margin:10px}
-  .cfg{display:none;padding:10px;background:var(--panel2);border-radius:8px;margin-bottom:10px}
-  .cfg.show{display:block}
-  .cfg input{width:100%;margin-bottom:6px}
+
+  /* signal gauge — the signature element */
+  .sig-gauge{text-align:center;padding:16px 12px;border-radius:6px;background:radial-gradient(circle at 50% 120%,var(--panel2),var(--bg));border:1px solid var(--line);margin-bottom:11px;position:relative;overflow:hidden}
+  .sig-dir{font-size:24px;font-weight:700;font-family:var(--mono);letter-spacing:2px;line-height:1}
+  .sig-score{font-size:10px;color:var(--dim);font-family:var(--mono);margin-top:5px;letter-spacing:1px}
+  .sig-meter{height:3px;background:var(--line);border-radius:2px;margin-top:12px;position:relative;overflow:hidden}
+  .sig-meter-fill{position:absolute;top:0;bottom:0;left:50%;background:var(--accent);transition:all .4s ease}
+
+  .warn{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.3);color:var(--amber);border-radius:5px;padding:8px 12px;font-size:11px;margin:1px}
+  .env-tag{font-size:10px;font-weight:700;letter-spacing:.5px;font-family:var(--mono)}
 </style>
 </head>
 <body>
 
 <div class="bar">
-  <h1>⚡ Delta Trader <span style="font-size:9px;color:var(--dim);font-weight:400">v10</span></h1>
-  <span class="dot" id="wsdot"></span><span class="dim" id="wstxt">connecting…</span>
+  <h1>◆ DELTA TERMINAL <span class="v">v11</span></h1>
+  <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:11px">connecting…</span>
   <select id="symbol"></select>
-  <button id="proxyBtn" onclick="toggleCfg()" style="position:relative;z-index:10">⚙ Proxy</button>
-  <span style="margin-left:auto" class="dim" id="clock"></span>
+  <span id="envPill" class="env-tag" style="padding:3px 8px;border-radius:3px;background:var(--panel2)"></span>
+  <span style="margin-left:auto" class="dim num" id="clock" style="font-size:11px"></span>
 </div>
 
 <div class="warn">
-  ⚠ <b>Live trading.</b> Market data is public. Balance, positions &amp; orders route through your PHP proxy.
+  Market data is public · order execution routes through your signed PHP proxy · auto-execute is testnet-locked
 </div>
 
-<!-- ALWAYS-VISIBLE PROXY BAR (no button needed) -->
-<div style="background:var(--panel2);border:1px solid var(--accent);border-radius:10px;padding:12px;margin:10px">
-  <div style="font-size:11px;color:var(--dim);margin-bottom:8px">⚙ PROXY CONNECTION — fill these to load balance &amp; enable trading</div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-    <span style="font-size:12px;color:var(--dim)">Environment:</span>
-    <button id="envLive" onclick="setEnv('live')" style="padding:6px 14px;font-weight:700">🔴 LIVE</button>
-    <button id="envTest" onclick="setEnv('testnet')" style="padding:6px 14px;font-weight:700">🧪 TESTNET</button>
-    <span id="envLabel" style="font-size:11px;color:var(--amber)"></span>
+<!-- ALWAYS-VISIBLE PROXY BAR -->
+<div style="background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:12px 14px;margin:1px">
+  <div style="font-size:9px;color:var(--dim);margin-bottom:9px;text-transform:uppercase;letter-spacing:1px">Proxy Connection</div>
+  <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:9px">
+    <button id="envLive" onclick="setEnv('live')" style="padding:6px 16px;font-weight:700;font-family:var(--mono)">LIVE</button>
+    <button id="envTest" onclick="setEnv('testnet')" style="padding:6px 16px;font-weight:700;font-family:var(--mono)">TESTNET</button>
+    <span id="envLabel" class="num" style="font-size:11px;color:var(--amber)"></span>
   </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <input id="cfgUrl" placeholder="Proxy URL (https://.../delta-proxy.php)" style="flex:2;min-width:200px">
-    <input id="cfgTok" placeholder="Token" style="flex:1;min-width:120px">
-    <button onclick="saveCfg()" id="saveCfgBtn" style="background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;padding:9px 18px">Save &amp; Connect</button>
+  <div style="display:flex;gap:7px;flex-wrap:wrap">
+    <input id="cfgUrl" placeholder="https://…/delta-proxy.php" style="flex:2;min-width:200px">
+    <input id="cfgTok" placeholder="token" style="flex:1;min-width:110px">
+    <button onclick="saveCfg()" id="saveCfgBtn" style="background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;padding:8px 18px">Connect</button>
   </div>
-  <div id="cfgMsg" style="font-size:12px;margin-top:8px;color:var(--dim)"></div>
+  <div id="cfgMsg" class="num" style="font-size:11px;margin-top:8px;color:var(--dim)"></div>
 </div>
 
 <div class="grid">
 
   <!-- LEFT: market / stats -->
-  <div>
-    <div class="card" style="margin-bottom:10px">
-      <div class="big" id="mark">—</div>
-      <div class="dim" id="markSub">mark price</div>
-      <div class="kv" style="margin-top:8px"><span class="dim">24h change</span><span class="v" id="chg">—</span></div>
-      <div class="kv"><span class="dim">24h high</span><span class="v" id="hi">—</span></div>
-      <div class="kv"><span class="dim">24h low</span><span class="v" id="lo">—</span></div>
-      <div class="kv"><span class="dim">24h volume</span><span class="v" id="vol">—</span></div>
-    </div>
-
-    <div class="card" style="margin-bottom:10px">
-      <h2>Derivatives</h2>
-      <div class="kv"><span class="dim">Open Interest</span><span class="v" id="oi">—</span></div>
-      <div class="kv"><span class="dim">Funding rate</span><span class="v" id="funding">—</span></div>
-      <div class="kv"><span class="dim">Mark vs Spot</span><span class="v" id="basis">—</span></div>
-      <div class="kv"><span class="dim">Index price</span><span class="v" id="spot">—</span></div>
+  <div class="col">
+    <div class="card">
+      <div class="price-hero">
+        <div class="big" id="mark">—</div>
+        <div class="price-sub" id="markSub">mark price</div>
+      </div>
+      <div class="kv"><span class="lbl">24h change</span><span class="v" id="chg">—</span></div>
+      <div class="kv"><span class="lbl">24h high</span><span class="v" id="hi">—</span></div>
+      <div class="kv"><span class="lbl">24h low</span><span class="v" id="lo">—</span></div>
+      <div class="kv"><span class="lbl">24h volume</span><span class="v" id="vol">—</span></div>
     </div>
 
     <div class="card">
-      <h2>Book Liquidity (top 20)</h2>
-      <div class="kv"><span class="dim">Bid depth</span><span class="v g" id="bidDepth">—</span></div>
-      <div class="kv"><span class="dim">Ask depth</span><span class="v r" id="askDepth">—</span></div>
-      <div class="kv"><span class="dim">Imbalance</span><span class="v" id="imb">—</span></div>
+      <h2>Derivatives</h2>
+      <div class="kv"><span class="lbl">Open Interest</span><span class="v" id="oi">—</span></div>
+      <div class="kv"><span class="lbl">Funding rate</span><span class="v" id="funding">—</span></div>
+      <div class="kv"><span class="lbl">Mark vs Spot</span><span class="v" id="basis">—</span></div>
+      <div class="kv"><span class="lbl">Index price</span><span class="v" id="spot">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Book Liquidity</h2>
+      <div class="kv"><span class="lbl">Bid depth</span><span class="v g" id="bidDepth">—</span></div>
+      <div class="kv"><span class="lbl">Ask depth</span><span class="v r" id="askDepth">—</span></div>
+      <div class="kv"><span class="lbl">Imbalance</span><span class="v" id="imb">—</span></div>
       <div class="liq" id="liqBar"><div class="l" style="width:50%"></div><div class="s" style="width:50%"></div></div>
     </div>
   </div>
 
   <!-- CENTER: orderbook + positions -->
-  <div>
-    <div class="card" style="margin-bottom:10px">
+  <div class="col">
+    <div class="card">
       <h2>Order Book</h2>
+      <div class="ob-head"><span>Price</span><span>Size</span></div>
       <div class="ob" id="asks"></div>
       <div class="spread" id="spread">—</div>
       <div class="ob" id="bids"></div>
     </div>
     <div class="card">
-      <h2>Open Positions &amp; Orders</h2>
+      <h2>Positions &amp; Orders</h2>
       <div class="tabs">
         <button class="act" onclick="posTab('pos',this)">Positions</button>
         <button onclick="posTab('ord',this)">Open Orders</button>
         <button onclick="posTab('bal',this)">Balance</button>
       </div>
-      <div id="posBox"><div class="dim">Set proxy to load account data.</div></div>
+      <div id="posBox"><div class="dim">Connect proxy to load account data.</div></div>
     </div>
   </div>
 
   <!-- RIGHT: trade + auto -->
-  <div>
-    <div class="card" style="margin-bottom:10px">
+  <div class="col">
+    <div class="card">
       <h2>Manual Trade</h2>
       <div class="side-btns">
         <button class="buy-btn act" id="bBuy" onclick="setSide('buy')">BUY / LONG</button>
@@ -163,10 +203,12 @@
       </div>
       <div class="fld" id="priceFld" style="display:none"><label>Limit price</label>
         <input id="price" type="number" step="any" placeholder="0.00"></div>
-      <div class="fld"><label>Size (contracts)</label>
-        <input id="size" type="number" step="1" value="1"></div>
-      <div class="fld"><label>Leverage</label>
-        <input id="lev" type="number" step="1" value="10"></div>
+      <div class="row2">
+        <div class="fld"><label>Size</label>
+          <input id="size" type="number" step="1" value="1"></div>
+        <div class="fld"><label>Leverage</label>
+          <input id="lev" type="number" step="1" value="10"></div>
+      </div>
 
       <div class="row2">
         <div class="fld"><label>Stop-loss %</label>
@@ -174,56 +216,56 @@
         <div class="fld"><label>Take-profit %</label>
           <input id="tpPct" type="number" step="0.1" value="0.6"></div>
       </div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px">
-        <input type="checkbox" id="useBracket" checked style="width:auto"> Attach auto SL/TP to entry (bracket)</label>
-      <div class="dim" style="font-size:11px;margin-bottom:8px" id="sltpPreview">SL/TP: —</div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:11px;margin-bottom:7px">
+        <input type="checkbox" id="useBracket" checked style="width:auto"> Attach auto SL/TP (bracket)</label>
+      <div class="dim num" style="font-size:11px;margin-bottom:8px" id="sltpPreview">SL/TP: —</div>
 
-      <button class="submit buy" id="submitBtn" onclick="placeOrder()">Place BUY order</button>
-      <div class="dim" style="margin-top:6px;font-size:11px" id="notional">Notional: —</div>
-    </div>
-
-    <div class="card" style="margin-bottom:10px">
-      <h2>Risk Guard</h2>
-      <div class="row2">
-        <div class="fld"><label>Daily loss limit (settle ccy)</label>
-          <input id="dailyLimit" type="number" step="any" placeholder="e.g. 2000"></div>
-        <div class="fld"><label>Today's realized PnL</label>
-          <input id="todayPnl" type="number" step="any" value="0" readonly style="background:var(--bg)"></div>
-      </div>
-      <div id="guardMsg" style="font-size:11px;color:var(--dim)">Set a daily loss limit to arm the kill-switch. Blocks new entries after the limit; existing positions untouched.</div>
+      <button class="submit buy" id="submitBtn" onclick="placeOrder()">PLACE BUY ORDER</button>
+      <div class="dim num" style="margin-top:7px;font-size:10px" id="notional">Notional: —</div>
     </div>
 
     <div class="card">
-      <h2>🤖 Signal Engine (observe &amp; log)</h2>
-      <div style="font-size:11px;color:var(--dim);margin-bottom:8px">Watches OI, orderbook, momentum &amp; funding. Flashes + journals signals. Places NO orders — this is the data-gathering brain.</div>
+      <h2>Risk Guard</h2>
+      <div class="row2">
+        <div class="fld"><label>Daily loss limit</label>
+          <input id="dailyLimit" type="number" step="any" placeholder="e.g. 2000"></div>
+        <div class="fld"><label>Live PnL</label>
+          <input id="todayPnl" type="number" step="any" value="0" readonly style="background:var(--bg)"></div>
+      </div>
+      <div id="guardMsg" style="font-size:10px;color:var(--dim)">Arm the kill-switch: blocks new entries past the loss limit. Open positions untouched.</div>
+    </div>
 
-      <div id="signalNow" style="text-align:center;padding:14px;border-radius:8px;background:var(--bg);margin-bottom:10px">
-        <div style="font-size:22px;font-weight:700" id="sigDir">NEUTRAL</div>
-        <div class="dim" style="font-size:11px" id="sigScore">score 0</div>
+    <div class="card">
+      <h2>Signal Engine</h2>
+
+      <div class="sig-gauge">
+        <div class="sig-dir" id="sigDir" style="color:var(--dim)">NEUTRAL</div>
+        <div class="sig-score" id="sigScore">SCORE 0.00</div>
+        <div class="sig-meter"><div class="sig-meter-fill" id="sigMeter" style="width:0"></div></div>
       </div>
 
-      <div class="kv"><span class="dim">OB imbalance</span><span class="v" id="sOb">—</span></div>
-      <div class="kv"><span class="dim">Momentum (30s)</span><span class="v" id="sMom">—</span></div>
-      <div class="kv"><span class="dim">OI trend</span><span class="v" id="sOi">—</span></div>
-      <div class="kv"><span class="dim">Funding bias</span><span class="v" id="sFund">—</span></div>
+      <div class="kv"><span class="lbl">OB imbalance</span><span class="v" id="sOb">—</span></div>
+      <div class="kv"><span class="lbl">Momentum 30s</span><span class="v" id="sMom">—</span></div>
+      <div class="kv"><span class="lbl">OI trend</span><span class="v" id="sOi">—</span></div>
+      <div class="kv"><span class="lbl">Funding bias</span><span class="v" id="sFund">—</span></div>
 
-      <div style="display:flex;gap:8px;margin:10px 0">
-        <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="sigOn" style="width:auto"> Engine on</label>
-        <button onclick="exportJournal()" style="padding:6px 10px;font-size:12px">⬇ Export journal</button>
+      <div style="display:flex;gap:8px;margin:11px 0">
+        <label style="flex:1;display:flex;align-items:center;gap:7px;font-size:11px"><input type="checkbox" id="sigOn" style="width:auto"> Engine on</label>
+        <button onclick="exportJournal()" style="padding:6px 10px;font-size:11px">↓ Journal</button>
       </div>
 
-      <div id="robotBox" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:10px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700">
-          <input type="checkbox" id="autoExec" style="width:auto"> 🤖 AUTO-EXECUTE trades</label>
-        <div id="autoExecMsg" style="font-size:10px;color:var(--dim);margin-top:4px">Places real orders on strong signals, with bracket SL/TP. One position at a time. <b>Testnet only</b> until proven.</div>
-        <div class="row2" style="margin-top:6px">
-          <div class="fld" style="margin:0"><label style="font-size:10px">Robot size (contracts)</label><input id="botSize" type="number" value="1" style="padding:5px"></div>
-          <div class="fld" style="margin:0"><label style="font-size:10px">Min score to fire</label><input id="botScore" type="number" step="0.05" value="0.45" style="padding:5px"></div>
+      <div id="robotBox" style="background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:10px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600">
+          <input type="checkbox" id="autoExec" style="width:auto"> AUTO-EXECUTE</label>
+        <div id="autoExecMsg" style="font-size:10px;color:var(--dim);margin-top:5px">Trades strong signals with bracket SL/TP, one position at a time. Testnet only until proven.</div>
+        <div class="row2" style="margin-top:8px">
+          <div class="fld" style="margin:0"><label>Robot size</label><input id="botSize" type="number" value="1" style="padding:5px"></div>
+          <div class="fld" style="margin:0"><label>Min score</label><input id="botScore" type="number" step="0.05" value="0.45" style="padding:5px"></div>
         </div>
       </div>
 
-      <div style="font-size:10px;color:var(--dim);margin-bottom:4px">SIGNAL JOURNAL (<span id="jCount">0</span>) — outcome tracked 60s after each</div>
-      <div class="log" id="autolog" style="max-height:160px">engine idle…</div>
+      <div style="font-size:9px;color:var(--dim);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Journal (<span id="jCount">0</span>) · outcome tracked +60s</div>
+      <div class="log" id="autolog">engine idle…</div>
     </div>
   </div>
 </div>
@@ -320,19 +362,19 @@ function renderBook(){
   const maxSz=Math.max(
     ...book.bids.map(b=>+b.size),
     ...book.asks.map(a=>+a.size),1);
-  const asksHtml=book.asks.slice().reverse().map(a=>{
+  const asksHtml=book.asks.slice(0,12).reverse().map(a=>{
     const w=(+a.size/maxSz*100).toFixed(0);
-    return `<div class="ob-row"><div class="ob-bar sell" style="width:${w}%"></div><span class="r">${fmt(+a.price,dp)}</span><span></span><span>${fmt(+a.size,0)}</span></div>`;
+    return `<div class="ob-row"><div class="ob-bar sell" style="width:${w}%"></div><span class="px r">${fmt(+a.price,dp)}</span><span class="sz">${fmt(+a.size,0)}</span></div>`;
   }).join('');
-  const bidsHtml=book.bids.map(b=>{
+  const bidsHtml=book.bids.slice(0,12).map(b=>{
     const w=(+b.size/maxSz*100).toFixed(0);
-    return `<div class="ob-row"><div class="ob-bar buy" style="width:${w}%"></div><span class="g">${fmt(+b.price,dp)}</span><span></span><span>${fmt(+b.size,0)}</span></div>`;
+    return `<div class="ob-row"><div class="ob-bar buy" style="width:${w}%"></div><span class="px g">${fmt(+b.price,dp)}</span><span class="sz">${fmt(+b.size,0)}</span></div>`;
   }).join('');
   $('asks').innerHTML=asksHtml; $('bids').innerHTML=bidsHtml;
   const bb=book.bids[0]?+book.bids[0].price:0, ba=book.asks[0]?+book.asks[0].price:0;
-  if(bb&&ba){const sp=ba-bb;$('spread').textContent=`spread ${fmt(sp,dp)} (${fmt(sp/bb*100,3)}%)`;}
+  if(bb&&ba){const sp=ba-bb;$('spread').textContent=`⟷ ${fmt(sp,dp)}  ·  ${fmt(sp/bb*100,3)}%`;}
 
-  // liquidity
+  // liquidity (use all fetched levels)
   const bidD=book.bids.reduce((s,b)=>s+ +b.size,0);
   const askD=book.asks.reduce((s,a)=>s+ +a.size,0);
   $('bidDepth').textContent=fmt(bidD,0);
@@ -387,6 +429,8 @@ function refreshEnvUI(){
   if(lb){lb.style.background=live?'var(--red)':'var(--panel2)';lb.style.borderColor=live?'var(--red)':'var(--line)';lb.style.color=live?'#fff':'var(--dim)';}
   if(tb){tb.style.background=!live?'var(--green)':'var(--panel2)';tb.style.borderColor=!live?'var(--green)':'var(--line)';tb.style.color=!live?'#fff':'var(--dim)';}
   const el=$('envLabel'); if(el)el.textContent=live?'⚠ REAL MONEY':'✓ fake money — safe to test robot';
+  const pill=$('envPill');
+  if(pill){pill.textContent=live?'LIVE':'TESTNET';pill.style.color=live?'var(--red)':'var(--green)';pill.style.background=live?'rgba(255,77,94,.12)':'rgba(38,217,127,.12)';}
   // auto-exec only allowed on testnet
   const ae=$('autoExec'), aem=$('autoExecMsg');
   if(ae){
@@ -610,8 +654,15 @@ function runSignal(imb){
   const dir = score>0.35?'LONG' : score<-0.35?'SHORT' : 'NEUTRAL';
   const col = dir==='LONG'?'var(--green)':dir==='SHORT'?'var(--red)':'var(--dim)';
   $('sigDir').textContent=dir; $('sigDir').style.color=col;
-  $('sigScore').textContent='score '+score.toFixed(2);
-  $('signalNow').style.boxShadow = dir!=='NEUTRAL'?`inset 0 0 0 2px ${col}`:'none';
+  $('sigScore').textContent='SCORE '+(score>=0?'+':'')+score.toFixed(2);
+  // meter: fill from center, left for short right for long
+  const m=$('sigMeter');
+  if(m){
+    const pct=Math.min(50,Math.abs(score)*50);
+    m.style.background=col;
+    if(score>=0){m.style.left='50%';m.style.width=pct+'%';}
+    else{m.style.left=(50-pct)+'%';m.style.width=pct+'%';}
+  }
 
   if(!$('sigOn')?.checked) return;
 
