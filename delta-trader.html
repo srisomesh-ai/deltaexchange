@@ -130,7 +130,7 @@
 <body>
 
 <div class="bar">
-  <h1>🌱 Delta Trader <span class="v">v16</span></h1>
+  <h1>🌱 Delta Trader <span class="v">v17</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:12px">connecting…</span>
   <select id="symbol"></select>
   <span id="envPill" class="pill-env"></span>
@@ -473,6 +473,7 @@ function toggleCfg(){
 }
 function setEnv(e){
   ENV=e; localStorage.setItem('dx_env',e);
+  if(e!=='testnet'){const ae=$('autoExec');if(ae)ae.checked=false;if(typeof stopRobotLoop==='function')stopRobotLoop();}
   refreshEnvUI();
   if(typeof updateRobotStatus==='function')updateRobotStatus();
   loadProducts(); loadBalance();
@@ -829,8 +830,8 @@ function runSignal(imb){
     $('jCount').textContent=journal.length;
     log(`▶ ${dir} @ ${fmt(mark,priceDp())}  score=${score.toFixed(2)} [ob${obScore.toFixed(1)} mo${momPct.toFixed(2)} oi${(oiDelta*100).toFixed(1)} fu${(fr*100).toFixed(3)}]`);
 
-    // --- AUTO-EXECUTE (testnet only, one position at a time) ---
-    maybeAutoExecute(dir, score, mark);
+    // (Auto-execution is handled by the scanner-driven robotTick loop,
+    //  which auto-picks the strongest coin — not just the loaded one.)
 
     // check outcome 60s later
     setTimeout(()=>{
@@ -874,17 +875,81 @@ function updateRobotStatus(){
     return;
   }
   light.style.background='var(--green)';
-  state.textContent = robotOpenTrade ? '● IN TRADE' : '✓ ARMED & WAITING';
+  state.textContent = robotOpenTrade ? '● IN TRADE' : '✓ ARMED — AUTO-PICKING';
   state.style.color='var(--green)';
   box.style.borderColor='var(--green)';box.style.background='var(--green-bg)';
   if(robotOpenTrade){
-    detail.innerHTML=`Holding <b>${robotOpenTrade.side.toUpperCase()}</b> ${robotOpenTrade.size} @ ${fmt(robotOpenTrade.entry,priceDp())} · waiting for SL/TP to close. Won't open a new trade until this exits.`;
+    detail.innerHTML=`<b style="font-size:13px;color:var(--txt)">Trading: ${robotOpenTrade.sym||cur.symbol}</b><br>Holding <b>${robotOpenTrade.side.toUpperCase()}</b> ${robotOpenTrade.size} @ ${fmt(robotOpenTrade.entry,priceDp())} · waiting for SL/TP. Won't open another until this closes.`;
   }else{
-    detail.innerHTML=`Robot armed on <b>testnet</b>, size <b>${size}</b>. Waiting for a signal with score ≥ <b>${minS}</b>. Watch the gauge above.`;
+    const nextPick=lastScan.find(c=>c.dir!=='—' && c.strength>=(+($('botScore').value||0.45)));
+    const willTrade = nextPick ? `<b style="font-size:14px;color:var(--green)">Will trade: ${nextPick.sym} ${nextPick.dir}</b>` : `<span style="color:var(--dim)">Scanning for a coin above min strength…</span>`;
+    detail.innerHTML=`${willTrade}<br>Robot auto-picks the strongest coin from the scanner (size <b>${size}</b>, min strength <b>${minS}</b>) and trades it. One position at a time.`;
   }
 }
 
 let botBusy=false;   // prevents overlap while checking/placing
+
+// ===== SCANNER-DRIVEN ROBOT: auto-picks best coin from scan, trades it =====
+let robotLoopTimer=null;
+function startRobotLoop(){
+  if(robotLoopTimer)return;
+  robotLoopTimer=setInterval(robotTick,15000); // check every 15s
+  robotTick();
+}
+function stopRobotLoop(){ clearInterval(robotLoopTimer); robotLoopTimer=null; }
+
+async function robotTick(){
+  if(!$('autoExec')?.checked || !$('sigOn')?.checked) return;
+  if(ENV!=='testnet') return;
+  if(botBusy || robotOpenTrade) return;   // one position at a time
+  botBusy=true;
+  try{
+    // 1. scan the whole market fresh
+    await runScan();
+    const minStr=+($('botScore').value||0.45);
+    // 2. pick #1 candidate with a clear direction and enough strength
+    const pick=lastScan.find(c=>c.dir!=='—' && c.strength>=minStr);
+    if(!pick){log('🤖 no coin clears min strength '+minStr+' — waiting');botBusy=false;return;}
+
+    // 3. verify no open position anywhere (true one-at-a-time)
+    const pj=await proxy('GET','/v2/positions/margined');
+    const anyOpen=(pj.result||[]).some(p=>+p.size!==0);
+    if(anyOpen){log('🤖 a position is already open — waiting for it to close');botBusy=false;return;}
+
+    // 4. find the product for this symbol and place the trade
+    const prod=products.find(p=>p.symbol===pick.sym);
+    if(!prod){log('🤖 product not found for '+pick.sym);botBusy=false;return;}
+    // load it into the UI too so the user sees what the robot is trading
+    selectSymbol(pick.sym);
+
+    const botSide = pick.dir==='LONG'?'buy':'sell';
+    const size=parseInt($('botSize').value)||1;
+    const mark=pick.mark;
+    const slP=+$('slPct').value||0.3, tpP=+$('tpPct').value||0.6;
+    const isBuy=botSide==='buy';
+    const tick=prod.tick_size?+prod.tick_size:0.5;
+    const rnd=px=>(Math.round(px/tick)*tick).toFixed(String(tick).includes('.')?String(tick).split('.')[1].length:0);
+    const sl=rnd(isBuy?mark*(1-slP/100):mark*(1+slP/100));
+    const tp=rnd(isBuy?mark*(1+tpP/100):mark*(1-tpP/100));
+    const body={
+      product_id:prod.id, product_symbol:prod.symbol, size, side:botSide, order_type:'market_order',
+      bracket_stop_loss_price:String(sl), bracket_stop_loss_limit_price:String(sl),
+      bracket_take_profit_price:String(tp), bracket_take_profit_limit_price:String(tp),
+      bracket_stop_trigger_method:'mark_price'
+    };
+    const lev=parseInt($('lev').value)||10;
+    await proxy('POST','/v2/products/'+prod.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
+    const jr=await proxy('POST','/v2/orders',{body});
+    if(jr.success===false){log('🤖✗ '+pick.sym+' rejected: '+JSON.stringify(jr.error));}
+    else{
+      robotOpenTrade={side:botSide,entry:mark,size,sym:pick.sym};
+      log(`🤖✓ ${botSide.toUpperCase()} ${size} ${pick.sym} @${fmt(mark,priceDp())}  SL ${sl} TP ${tp}  (strength ${(pick.strength*100).toFixed(0)})`);
+      updateRobotStatus();
+      loadPositions();
+    }
+  }catch(e){log('🤖 loop error: '+e.message);}
+  botBusy=false;
+}
 async function maybeAutoExecute(dir, score, mark){
   const ae=$('autoExec');
   if(!ae?.checked) return;
@@ -979,12 +1044,13 @@ $('autoExec')?.addEventListener('change',()=>{
       $('autoExec').checked=false;
     }else{
       const size=$('botSize').value, minS=$('botScore').value;
-      const ok=confirm(`ARM THE ROBOT?\n\nEnvironment: TESTNET (fake money)\nSize: ${size} contracts\nMin score to fire: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\n\nThe robot will place real testnet orders automatically when a strong signal appears. One position at a time.\n\nConfirm to arm?`);
-      if(ok)log('🤖 ROBOT ARMED — waiting for signal');
+      const ok=confirm(`ARM THE AUTO-PICK ROBOT?\n\nEnvironment: TESTNET (fake money)\nSize: ${size} contracts per trade\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\n\nThe robot will SCAN the whole market, pick the STRONGEST coin above min strength, and trade it automatically — one position at a time. It chooses the coin, not you.\n\nConfirm to arm?`);
+      if(ok){log('🤖 ROBOT ARMED — auto-picking best coin from scanner');startRobotLoop();}
       else $('autoExec').checked=false;
     }
   }else{
     log('🤖 robot disarmed');
+    stopRobotLoop();
   }
   updateRobotStatus();
 });
