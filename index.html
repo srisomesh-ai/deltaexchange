@@ -130,7 +130,7 @@
 <body>
 
 <div class="bar">
-  <h1>🌱 Delta Trader <span class="v">v20</span></h1>
+  <h1>🌱 Delta Trader <span class="v">v21</span></h1>
   <span class="dot" id="wsdot"></span><span class="dim num" id="wstxt" style="font-size:12px">connecting…</span>
   <select id="symbol"></select>
   <span id="envPill" class="pill-env"></span>
@@ -324,6 +324,13 @@
           <span id="rsState" style="font-weight:700;font-size:14px">ROBOT OFF</span>
         </div>
         <div id="rsDetail" style="font-size:11px;color:var(--dim);margin-top:7px;line-height:1.6">Turn on the engine and tick auto-execute to arm the robot.</div>
+      </div>
+
+      <!-- TUNING STATS -->
+      <div class="card" style="padding:12px;margin-bottom:12px;background:var(--panel2);box-shadow:none">
+        <div style="font-size:11px;font-weight:700;margin-bottom:8px">📊 Robot Performance (this session)</div>
+        <div id="robotStats"><span class="dim" style="font-size:12px">No completed robot trades yet.</span></div>
+        <div style="font-size:10px;color:var(--dim);margin-top:8px">Change a setting, then watch the win rate over the next trades to see if it actually helped. Net after fees is the number that matters.</div>
       </div>
 
       <div style="font-size:9px;color:var(--dim);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Journal (<span id="jCount">0</span>) · outcome tracked +60s</div>
@@ -548,7 +555,12 @@ async function loadPositions(){
     // if robot had a trade and now no position on symbol, it closed
     if(robotOpenTrade){
       const stillOpen=(j.result||[]).some(p=>+p.size!==0 && (p.product_symbol===cur.symbol||p.product_id===cur.id));
-      if(!stillOpen){log('   🤖 position closed (SL/TP hit) — robot free to trade again');robotOpenTrade=null;updateRobotStatus();}
+      if(!stillOpen){
+        // robot trade closed — record outcome for tuning stats
+        recordRobotClose();
+        log('   🤖 position closed (SL/TP hit) — robot free to trade again');
+        robotOpenTrade=null;updateRobotStatus();
+      }
     }
     // feed live PnL into the risk guard
     const totPnl=(j.result||[]).reduce((s,p)=>s+(+p.unrealized_pnl||0),0);
@@ -911,6 +923,49 @@ function updateRobotStatus(){
 let botBusy=false;   // prevents overlap while checking/placing
 let lastTradeTime=0;      // for cooldown
 let recentCoins=[];       // last few traded coins to rotate away from
+let robotStats={n:0,wins:0,losses:0,grossWin:0,grossLoss:0,fees:0,byStrength:{}};
+
+async function recordRobotClose(){
+  if(!robotOpenTrade)return;
+  const tr=robotOpenTrade;
+  try{
+    // fetch recent fills for this symbol to estimate realized PnL
+    const j=await proxy('GET','/v2/fills',{query:'?product_id='+(products.find(p=>p.symbol===tr.sym)?.id||'')+'&page_size=10'});
+    const fills=(j.result||[]);
+    // sum PnL & fees from the closing fills (rough — testnet estimate)
+    let pnl=0, fee=0;
+    fills.slice(0,4).forEach(f=>{pnl+=(+f.pnl||0);fee+=(+f.commission||+f.fee||0);});
+    // fallback: estimate from entry vs current mark
+    if(pnl===0 && ticker.mark_price){
+      const move=(+ticker.mark_price-tr.entry)/tr.entry;
+      pnl=(tr.side==='buy'?move:-move)*tr.entry*tr.size*(products.find(p=>p.symbol===tr.sym)?.contract_value||1);
+    }
+    const win=pnl>0;
+    robotStats.n++;
+    if(win){robotStats.wins++;robotStats.grossWin+=pnl;}else{robotStats.losses++;robotStats.grossLoss+=Math.abs(pnl);}
+    robotStats.fees+=Math.abs(fee);
+    log(`   📊 trade #${robotStats.n}: ${win?'WIN':'LOSS'} ${pnl>=0?'+':''}${pnl.toFixed(3)} (fee ${fee.toFixed(3)})`);
+    renderStats();
+  }catch(e){/* stats are best-effort */}
+}
+
+function renderStats(){
+  const el=$('robotStats'); if(!el)return;
+  const s=robotStats;
+  if(!s.n){el.innerHTML='<span class="dim">No completed robot trades yet.</span>';return;}
+  const wr=(s.wins/s.n*100);
+  const avgW=s.wins?s.grossWin/s.wins:0;
+  const avgL=s.losses?s.grossLoss/s.losses:0;
+  const net=s.grossWin-s.grossLoss-s.fees;
+  const wrCol=wr>=50?'var(--green)':'var(--red)';
+  const netCol=net>=0?'var(--green)':'var(--red)';
+  el.innerHTML=`
+    <div class="kv"><span class="lbl">Trades</span><span class="v">${s.n}</span></div>
+    <div class="kv"><span class="lbl">Win rate</span><span class="v" style="color:${wrCol}">${wr.toFixed(0)}% (${s.wins}W/${s.losses}L)</span></div>
+    <div class="kv"><span class="lbl">Avg win / loss</span><span class="v">+${avgW.toFixed(2)} / -${avgL.toFixed(2)}</span></div>
+    <div class="kv"><span class="lbl">Fees paid</span><span class="v r">-${s.fees.toFixed(2)}</span></div>
+    <div class="kv"><span class="lbl">Net after fees</span><span class="v" style="color:${netCol};font-size:15px">${net>=0?'+':''}${net.toFixed(2)}</span></div>`;
+}
 
 // compute how many contracts a %-of-balance works out to for a given coin
 function computeContracts(prod, price){
