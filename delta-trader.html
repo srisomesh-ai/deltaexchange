@@ -636,7 +636,7 @@ function gatherSettings(){
   const s={};
   for(let i=0;i<localStorage.length;i++){
     const k=localStorage.key(i);
-    if(k.startsWith('dx_set_')||['dx_engineOn','dx_env','dx_log'].includes(k))s[k]=localStorage.getItem(k);
+    if(k.startsWith('dx_set_')||['dx_engineOn','dx_env','dx_log','dx_journal'].includes(k))s[k]=localStorage.getItem(k);
   }
   return s;
 }
@@ -658,6 +658,8 @@ async function cloudLoad(){
     const j=await r.json();
     if(j.success&&j.data){
       Object.entries(j.data).forEach(([k,v])=>{if(v!=null)localStorage.setItem(k,v);});
+      // rebuild in-memory journal from synced data
+      try{const sj=localStorage.getItem('dx_journal');if(sj){journal=JSON.parse(sj);if($('jCount'))$('jCount').textContent=journal.length;}}catch(e){}
       log('☁ settings loaded from server');
       return true;
     }
@@ -911,6 +913,8 @@ function pickSearch(sym){
 let priceHist=[];     // {t, mark}
 let oiHist=[];        // {t, oi}
 let journal=[];       // logged signals
+try{const sj=localStorage.getItem('dx_journal');if(sj)journal=JSON.parse(sj);}catch(e){journal=[];}
+function saveJournal(){try{localStorage.setItem('dx_journal',JSON.stringify(journal.slice(-500)));if(typeof cloudSaveSoon==='function')cloudSaveSoon();}catch(e){}}
 let lastSigDir='NEUTRAL';
 let lastSigFire=0;
 
@@ -978,6 +982,7 @@ function runSignal(imb){
       outcome:null
     };
     journal.push(entry);
+    saveJournal();
     $('jCount').textContent=journal.length;
     log(`▶ ${dir} @ ${fmt(mark,priceDp())}  score=${score.toFixed(2)} [ob${obScore.toFixed(1)} mo${momPct.toFixed(2)} oi${(oiDelta*100).toFixed(1)} fu${(fr*100).toFixed(3)}]`);
 
@@ -1006,6 +1011,7 @@ function runSignal(imb){
       }
       const good = (dir==='LONG'&&move>0)||(dir==='SHORT'&&move<0);
       entry.outcome={movePct:+move.toFixed(3), win:good};
+      saveJournal();
       log(`   └ 60s: ${outSym} ${(move>=0?'+':'')}${move.toFixed(3)}%  ${good?'✓ win':'✗ lose'}  (${dir})`);
     },60000);
   }
@@ -1398,4 +1404,7 @@ updateRobotStatus();
 loadProducts();
 if(PROXY){setTimeout(loadBalance,800);}
 onType();
+// show restored journal count
+if($('jCount'))$('jCount').textContent=journal.length;
+if(journal.length)log('📓 journal restored — '+journal.length+' signals');
 </script></body></html>
