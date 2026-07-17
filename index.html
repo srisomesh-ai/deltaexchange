@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v34</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v35</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -298,6 +298,10 @@ if(sessionStorage.getItem('dx_auth')==='1'){
             <div class="fld"><label>Cooldown (min)</label><input id="botCooldown" type="number" step="1" value="3"></div>
             <div class="fld"><label>Trail step %</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
           </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0 8px;padding:8px;background:var(--green-bg);border-radius:6px;cursor:pointer">
+            <input type="checkbox" id="trendFilter" checked style="width:auto">
+            <span><b>Trend filter</b> — only trade WITH the multi-minute trend (recommended)</span>
+          </label>
           <input id="botSize" type="hidden" value="1">
           <div id="sizeCalc" class="num" style="font-size:10px;color:var(--muted)"></div>
         </div>
@@ -990,6 +994,30 @@ function valAgo(arr,ms,key){
   return old? old[key] : null;
 }
 
+/* ===== TREND FILTER: multi-minute direction from candles ===== */
+// caches trend per symbol so we don't hammer the API; refreshes each entry ~2min
+const trendCache={};  // sym -> {t, trend:-1..+1, dir:'up'/'down'/'flat'}
+async function getTrend(sym){
+  const c=trendCache[sym];
+  if(c && Date.now()-c.t < 120000) return c;  // 2-min cache
+  try{
+    // last ~30 min of 1-minute candles
+    const end=Math.floor(Date.now()/1000), start=end-1800;
+    const j=await pubGet('/v2/history/candles','?resolution=1m&symbol='+sym+'&start='+start+'&end='+end);
+    const cd=(j.result||[]).slice().sort((a,b)=>a.time-b.time);
+    if(cd.length<10){const r={t:Date.now(),trend:0,dir:'flat'};trendCache[sym]=r;return r;}
+    const closes=cd.map(x=>+x.close);
+    // simple trend: compare short MA (last 5) vs long MA (last 20), normalized
+    const maShort=closes.slice(-5).reduce((a,b)=>a+b,0)/5;
+    const maLong=closes.slice(-20).reduce((a,b)=>a+b,0)/Math.min(20,closes.length);
+    const slope=(maShort-maLong)/maLong;             // +ve = uptrend
+    const trend=Math.max(-1,Math.min(1, slope*200));  // scale
+    const dir = trend>0.15?'up' : trend<-0.15?'down' : 'flat';
+    const r={t:Date.now(),trend:+trend.toFixed(3),dir};
+    trendCache[sym]=r; return r;
+  }catch(e){const r={t:Date.now(),trend:0,dir:'flat'};trendCache[sym]=r;return r;}
+}
+
 function runSignal(imb){
   // always update history + component displays
   const mark=+ticker.mark_price;
@@ -1364,6 +1392,19 @@ async function robotTick(){
     const anyOpen=(pj.result||[]).some(p=>+p.size!==0);
     if(anyOpen){log('🤖 a position is already open — waiting for it to close');botBusy=false;return;}
 
+    // 3b. TREND FILTER — only trade WITH the multi-minute trend (if enabled)
+    if($('trendFilter')?.checked){
+      const tr=await getTrend(pick.sym);
+      const wantLong = pick.dir==='LONG';
+      const agrees = (wantLong && tr.dir!=='down') || (!wantLong && tr.dir!=='up');
+      if(!agrees){
+        log(`🤖 skipped ${pick.sym} ${pick.dir} — fights ${tr.dir}trend (trend ${tr.trend>=0?'+':''}${tr.trend})`);
+        recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);  // skip it this round
+        botBusy=false;return;
+      }
+      log(`🤖 ${pick.sym} ${pick.dir} agrees with ${tr.dir}trend ✓`);
+    }
+
     // 4. find the product for this symbol and place the trade
     const prod=products.find(p=>p.symbol===pick.sym);
     if(!prod){log('🤖 product not found for '+pick.sym);botBusy=false;return;}
@@ -1537,6 +1578,11 @@ $('autoExec')?.addEventListener('change',()=>{
 });
 // restore engine state
 if(localStorage.getItem('dx_engineOn')==='1'){const s=$('sigOn');if(s){s.checked=true;}}
+// restore + persist trend filter
+if($('trendFilter')){
+  if(localStorage.getItem('dx_trendFilter')==='0')$('trendFilter').checked=false;
+  $('trendFilter').addEventListener('change',()=>localStorage.setItem('dx_trendFilter',$('trendFilter').checked?'1':'0'));
+}
 // AUTO-RESUME master (Start Robot) if it was left on — survives refresh
 if(localStorage.getItem('dx_master')==='1'){
   const isLive = ENV!=='testnet';
