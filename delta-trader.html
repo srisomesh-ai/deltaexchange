@@ -463,6 +463,7 @@ async function loadProducts(){
 function selectSymbol(sym){
   cur=products.find(p=>p.symbol===sym);
   $('markSub').textContent=sym+' · mark price';
+  priceHist=[]; oiHist=[];   // reset history so momentum/OI don't mix the old coin's data
   refreshAll();
 }
 
@@ -936,11 +937,13 @@ function runSignal(imb){
   const obScore=Math.max(-1,Math.min(1,(imb-0.5)*4));   // 0.75 bid → +1
   // 2. momentum: price now vs 30s ago, in %
   const p30=valAgo(priceHist,30000,'mark');
-  const momPct=(p30&&mark)?((mark-p30)/p30*100):0;
+  let momPct=(p30&&mark)?((mark-p30)/p30*100):0;
+  if(!isFinite(momPct)||Math.abs(momPct)>20)momPct=0;  // guard: >20% in 30s = stale/cross-coin data, ignore
   const momScore=Math.max(-1,Math.min(1,momPct/0.15));  // 0.15% move → full
   // 3. OI trend: rising OI + rising price = conviction long; use OI delta sign * price dir
   const oi30=valAgo(oiHist,30000,'oi');
-  const oiDelta=(oi30&&oi)?((oi-oi30)/oi30):0;
+  let oiDelta=(oi30&&oi)?((oi-oi30)/oi30):0;
+  if(!isFinite(oiDelta)||Math.abs(oiDelta)>5)oiDelta=0;  // guard: >500% OI jump = stale/cross-coin, ignore
   const oiScore=Math.max(-1,Math.min(1, (oiDelta*100) * Math.sign(momPct||1) ));
   // 4. funding bias: high +funding = crowded longs = fade short; invert
   const fr=+ticker.funding_rate||0;
@@ -981,13 +984,29 @@ function runSignal(imb){
     // (Auto-execution is handled by the scanner-driven robotTick loop,
     //  which auto-picks the strongest coin — not just the loaded one.)
 
-    // check outcome 60s later
-    setTimeout(()=>{
-      const px=+ticker.mark_price;
+    // capture this entry's own symbol so the 60s check compares the RIGHT coin
+    const outSym = cur.symbol;
+    // check outcome 60s later — fetch THIS coin's price, not whatever is loaded now
+    setTimeout(async ()=>{
+      let px=0;
+      try{
+        const j=await pubGet('/v2/tickers/'+outSym);
+        px=+(j.result?.mark_price || j.result?.close || 0);
+      }catch(e){}
+      // guard: if we couldn't get a valid price, or it's the wrong coin loaded, skip rather than log garbage
+      if(!px || !isFinite(px) || px<=0){
+        log(`   └ 60s: no valid price for ${outSym} — outcome skipped`);
+        return;
+      }
       const move=((px-entry.entryPx)/entry.entryPx*100);
+      // sanity clamp: a >50% move in 60s on a perp is a data error, not real — discard
+      if(Math.abs(move)>50){
+        log(`   └ 60s: ${outSym} move ${move.toFixed(1)}% looks like bad data — outcome discarded`);
+        return;
+      }
       const good = (dir==='LONG'&&move>0)||(dir==='SHORT'&&move<0);
       entry.outcome={movePct:+move.toFixed(3), win:good};
-      log(`   └ 60s: ${(move>=0?'+':'')}${move.toFixed(3)}%  ${good?'✓ win':'✗ lose'}  (${dir})`);
+      log(`   └ 60s: ${outSym} ${(move>=0?'+':'')}${move.toFixed(3)}%  ${good?'✓ win':'✗ lose'}  (${dir})`);
     },60000);
   }
   lastSigDir=dir;
