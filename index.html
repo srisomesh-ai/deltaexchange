@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v32</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v33</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -1048,12 +1048,62 @@ async function trailMonitor(){
   if(!robotOpenTrade || !robotOpenTrade.prodId) return;
   if(trailBusy) return;
   const tr=robotOpenTrade;
-  const px = +ticker.mark_price || 0;
-  if(!px) return;
+
+  // get THIS trade's coin price (not whatever is loaded on screen)
+  let px=0;
+  if(cur && (cur.symbol===tr.sym || cur.id===tr.prodId)){
+    px=+ticker.mark_price||0;               // loaded coin matches — use live ticker
+  }else{
+    try{const j=await pubGet('/v2/tickers/'+tr.sym);px=+(j.result?.mark_price||j.result?.close||0);}catch(e){}
+  }
+  if(!px||!isFinite(px)) return;
+
+  // reconnected trades (after refresh) may be missing trailing fields — rebuild them
+  if(tr.curSL==null || tr.curTP==null){
+    const prod=products.find(p=>p.symbol===tr.sym||p.id===tr.prodId);
+    tr.tick = tr.tick || +prod?.tick_size || 0.5;
+    tr.slP  = tr.slP  || (+$('slPct').value||0.3);
+    tr.tpP  = tr.tpP  || (+$('tpPct').value||0.6);
+    tr.stepPct = tr.stepPct || (+$('trailStep')?.value||tr.slP);
+    const isBuy0 = tr.side==='buy';
+    tr.curSL = isBuy0 ? tr.entry*(1-tr.slP/100) : tr.entry*(1+tr.slP/100);
+    tr.curTP = isBuy0 ? tr.entry*(1+tr.tpP/100) : tr.entry*(1-tr.tpP/100);
+    tr.steps = tr.steps||0;
+    saveRobotTrade();
+    log('   ⤴ trailing re-armed on reconnected trade '+tr.sym);
+  }
+
   const isBuy = tr.side==='buy';
   const stepFrac = (tr.stepPct||tr.slP||0.3)/100;
   const step = tr.entry*stepFrac;                 // price distance of one step
   const favMove = isBuy ? (px - tr.entry) : (tr.entry - px);
+
+  // ── BREAKEVEN LOCK ──
+  // The moment the trade is in profit (past a small buffer to cover fees),
+  // snap the stop to entry so a winner can never become a loss. Done once.
+  const feeBuffer = tr.entry*0.0008;              // ~0.08% covers taker fees both sides
+  if(!tr.beLocked && favMove > feeBuffer){
+    const rnd0 = v => {const t=tr.tick||0.5; const dp=String(t).includes('.')?String(t).split('.')[1].length:0; return +(Math.round(v/t)*t).toFixed(dp);};
+    // stop = entry nudged slightly into profit so fees are covered
+    const beSL = isBuy ? rnd0(tr.entry + feeBuffer) : rnd0(tr.entry - feeBuffer);
+    tr.curSL = beSL; tr.beLocked = true;
+    trailBusy=true;
+    try{
+      const body={
+        product_id:tr.prodId,
+        bracket_stop_loss_price:String(tr.curSL), bracket_stop_loss_limit_price:String(tr.curSL),
+        bracket_take_profit_price:String(tr.curTP), bracket_take_profit_limit_price:String(tr.curTP),
+        bracket_stop_trigger_method:'mark_price'
+      };
+      const jr=await proxy('POST','/v2/orders/bracket',{body});
+      if(jr.success===false){log('   🛡 breakeven note: '+JSON.stringify(jr.error?.code||jr.error));}
+      else{log('   🛡 BREAKEVEN LOCKED — stop moved to entry ('+tr.curSL+'). This trade can no longer lose.');}
+      saveRobotTrade(); updateRobotStatus();
+    }catch(e){log('   🛡 breakeven error: '+e.message);}
+    trailBusy=false;
+    return;
+  }
+
   const stepsNow = Math.floor(favMove/step);
   if(stepsNow <= tr.steps) return;                // no new step cleared
   trailBusy=true;
@@ -1076,6 +1126,7 @@ async function trailMonitor(){
     }else{
       const lockedProfit = isBuy ? (tr.curSL - tr.entry) : (tr.entry - tr.curSL);
       log(`   ⤴ TRAIL step ${tr.steps}: SL→${tr.curSL}  TP→${tr.curTP}  ${lockedProfit>0?'🔒 locked +'+fmt(lockedProfit,priceDp()):'breakeven'}`);
+      saveRobotTrade();
       updateRobotStatus();
     }
   }catch(e){log('   ⤴ trail error: '+e.message);}
@@ -1103,7 +1154,8 @@ function updateRobotStatus(){
     let trailTxt='';
     if($('trailOn')?.checked && t.curSL){
       const locked=(t.side==='buy')?(t.curSL-t.entry):(t.entry-t.curSL);
-      trailTxt=`<br><span style="color:var(--gold-dim)">⤴ SL ${t.curSL} · TP ${t.curTP} · step ${t.steps||0}</span> ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
+      const beBadge = t.beLocked ? ' <span class="g">🛡 breakeven-safe</span>' : '';
+      trailTxt=`<br><span style="color:var(--gold-dim)">⤴ SL ${t.curSL} · TP ${t.curTP} · step ${t.steps||0}</span>${beBadge} ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
     }
     detail.innerHTML=`<b style="color:var(--txt)">${t.sym||cur?.symbol||'position'}</b> · Holding <b>${(t.side||'').toUpperCase()}</b> ${t.size} @ ${fmt(t.entry,priceDp())}${trailTxt}<br><span class="dim">Managed until SL/TP closes it. Won't open another until then.</span>`;
     return;
