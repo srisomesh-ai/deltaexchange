@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v40</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v41</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -1125,6 +1125,36 @@ try{const rt=localStorage.getItem('dx_robotTrade');if(rt)robotOpenTrade=JSON.par
 
 // ===== STEPPED TRAILING STOP + MOVING TP =====
 let trailBusy=false;
+// Reliably move the protective stop to newSL: try bracket edit, then fall back to cancel+replace stop order
+async function moveStopTo(tr, newSL, newTP){
+  // attempt 1: bracket edit
+  try{
+    const body={
+      product_id:tr.prodId,
+      bracket_stop_loss_price:String(newSL), bracket_stop_loss_limit_price:String(newSL),
+      bracket_take_profit_price:String(newTP), bracket_take_profit_limit_price:String(newTP),
+      bracket_stop_trigger_method:'mark_price'
+    };
+    const jr=await proxy('POST','/v2/orders/bracket',{body});
+    if(jr.success!==false) return true;
+  }catch(e){}
+  // attempt 2: cancel existing stop orders, place a fresh standalone stop
+  try{
+    const oj=await proxy('GET','/v2/orders',{query:'?product_ids='+tr.prodId+'&states=open,pending'});
+    for(const o of (oj.result||[])){
+      const isStop=(o.stop_order_type||'').toLowerCase().includes('stop')||o.stop_price;
+      if(isStop && o.id){try{await proxy('DELETE','/v2/orders',{body:{id:o.id,product_id:tr.prodId}});}catch(e){}}
+    }
+    const closeSide = tr.side==='buy'?'sell':'buy';
+    const body={
+      product_id:tr.prodId, size:tr.size, side:closeSide,
+      order_type:'market_order', stop_order_type:'stop_loss_order',
+      stop_price:String(newSL), stop_trigger_method:'mark_price', reduce_only:true
+    };
+    const r=await proxy('POST','/v2/orders',{body});
+    return r.success!==false;
+  }catch(e){return false;}
+}
 async function trailMonitor(){
   // periodic naked-position safety check (every ~30s) regardless of trailing toggle
   if(robotOpenTrade && robotOpenTrade.prodId && !trailBusy){
@@ -1135,10 +1165,12 @@ async function trailMonitor(){
       if(prod)verifyProtection(prod, robotOpenTrade.side, robotOpenTrade.size, robotOpenTrade.curSL||robotOpenTrade.entry, robotOpenTrade.curTP||robotOpenTrade.entry);
     }
   }
-  if(!$('trailOn')?.checked) return;
   if(!robotOpenTrade || !robotOpenTrade.prodId) return;
   if(trailBusy) return;
+  // Note: breakeven-lock + trailing now run for ANY open robot trade.
+  // The trailOn toggle only controls the *stepped trailing*; breakeven always protects.
   const tr=robotOpenTrade;
+  const trailingOn = $('trailOn')?.checked;
 
   // get THIS trade's coin price (not whatever is loaded on screen)
   let px=0;
@@ -1175,26 +1207,21 @@ async function trailMonitor(){
   const feeBuffer = tr.entry*0.0008;              // ~0.08% covers taker fees both sides
   if(!tr.beLocked && favMove > feeBuffer){
     const rnd0 = v => {const t=tr.tick||0.5; const dp=String(t).includes('.')?String(t).split('.')[1].length:0; return +(Math.round(v/t)*t).toFixed(dp);};
-    // stop = entry nudged slightly into profit so fees are covered
     const beSL = isBuy ? rnd0(tr.entry + feeBuffer) : rnd0(tr.entry - feeBuffer);
-    tr.curSL = beSL; tr.beLocked = true;
     trailBusy=true;
-    try{
-      const body={
-        product_id:tr.prodId,
-        bracket_stop_loss_price:String(tr.curSL), bracket_stop_loss_limit_price:String(tr.curSL),
-        bracket_take_profit_price:String(tr.curTP), bracket_take_profit_limit_price:String(tr.curTP),
-        bracket_stop_trigger_method:'mark_price'
-      };
-      const jr=await proxy('POST','/v2/orders/bracket',{body});
-      if(jr.success===false){log('   🛡 breakeven note: '+JSON.stringify(jr.error?.code||jr.error));}
-      else{log('   🛡 BREAKEVEN LOCKED — stop moved to entry ('+tr.curSL+'). This trade can no longer lose.');}
+    const okMove = await moveStopTo(tr, beSL, tr.curTP);
+    if(okMove){
+      tr.curSL = beSL; tr.beLocked = true;
       saveRobotTrade(); updateRobotStatus();
-    }catch(e){log('   🛡 breakeven error: '+e.message);}
+      log('   🛡 BREAKEVEN LOCKED — stop moved to '+beSL+' (entry). This trade can no longer lose.');
+    }else{
+      log('   🛡 breakeven move failed — will retry next cycle');
+    }
     trailBusy=false;
     return;
   }
 
+  if(!trailingOn) return;   // stepped trailing only if toggle on (breakeven above always runs)
   const stepsNow = Math.floor(favMove/step);
   if(stepsNow <= tr.steps) return;                // no new step cleared
   trailBusy=true;
@@ -1204,21 +1231,17 @@ async function trailMonitor(){
     const rnd = v => {const t=tr.tick||0.5; const dp=String(t).includes('.')?String(t).split('.')[1].length:0; return (Math.round(v/t)*t).toFixed(dp);};
     const newSL = isBuy ? +tr.curSL + gained*step : +tr.curSL - gained*step;
     const newTP = isBuy ? +tr.curTP + gained*step : +tr.curTP - gained*step;
-    tr.curSL = +rnd(newSL); tr.curTP = +rnd(newTP);
-    const body={
-      product_id:tr.prodId,
-      bracket_stop_loss_price:String(tr.curSL), bracket_stop_loss_limit_price:String(tr.curSL),
-      bracket_take_profit_price:String(tr.curTP), bracket_take_profit_limit_price:String(tr.curTP),
-      bracket_stop_trigger_method:'mark_price'
-    };
-    const jr=await proxy('POST','/v2/orders/bracket',{body});
-    if(jr.success===false){
-      log('   ⤴ trail edit note: '+JSON.stringify(jr.error?.code||jr.error));
-    }else{
+    const nSL=+rnd(newSL), nTP=+rnd(newTP);
+    const okMove = await moveStopTo(tr, nSL, nTP);
+    if(okMove){
+      tr.curSL=nSL; tr.curTP=nTP;
       const lockedProfit = isBuy ? (tr.curSL - tr.entry) : (tr.entry - tr.curSL);
       log(`   ⤴ TRAIL step ${tr.steps}: SL→${tr.curSL}  TP→${tr.curTP}  ${lockedProfit>0?'🔒 locked +'+fmt(lockedProfit,priceDp()):'breakeven'}`);
       saveRobotTrade();
       updateRobotStatus();
+    }else{
+      tr.steps=stepsNow-gained; // revert step count so it retries
+      log('   ⤴ trail move failed — will retry');
     }
   }catch(e){log('   ⤴ trail error: '+e.message);}
   trailBusy=false;
