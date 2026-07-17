@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v36</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v37</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -916,11 +916,17 @@ async function runScan(){
       const rangePos=(hi>lo)? (mark-lo)/(hi-lo) : 0.5;
       const vol=+t.turnover_usd||+t.turnover||+t.volume||0;
 
-      const dirScore=(chg||0)*0.6 + (rangePos-0.5)*2 + basis*1.5 - fr*1000;
+      // dirScore: bounded contributions so no single term (esp. funding on thin coins) dominates
+      const clamp=(v,m)=>Math.max(-m,Math.min(m,v));
+      const dirScore = clamp((chg||0)*0.6, 3)          // 24h momentum, capped
+                     + clamp((rangePos-0.5)*2, 1)       // position in range
+                     + clamp(basis*1.5, 1)              // mark-spot basis, capped
+                     - clamp(fr*1000, 1.5);             // funding bias, capped (was unbounded!)
+      // strength: how strong/tradeable is this setup (0-1). Rewards real movement + range extremes.
       const strength=Math.min(1,
-        Math.abs(chg||0)/5*0.7 +
-        Math.abs(rangePos-0.5)*2*0.2 +
-        Math.min(Math.abs(fr)*2000,1)*0.1
+        Math.abs(chg||0)/3*0.5 +                        // 3% 24h move → 0.5 (was /5*0.7, too strict)
+        Math.abs(rangePos-0.5)*2*0.35 +                 // pinned at high/low → 0.35
+        Math.min(Math.abs(fr)*1500,1)*0.15              // funding extreme → 0.15
       );
       const dir = dirScore>0.3?'LONG':dirScore<-0.3?'SHORT':'—';
       return {sym:t.symbol, chg, mark, dir, strength:+strength.toFixed(2), fr, vol};
