@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v31</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v32</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -1089,6 +1089,25 @@ function updateRobotStatus(){
   const light=$('rsLight'), state=$('rsState'), detail=$('rsDetail'), box=$('robotStatus');
   if(!light)return;
   const size=$('botSize')?.value||1, minS=$('botScore')?.value||0.45;
+
+  // ── OPEN TRADE takes priority over everything ──
+  // If a position is live (even after refresh with auto-pilot off), show it.
+  if(robotOpenTrade){
+    const t=robotOpenTrade;
+    const isLive = ENV!=='testnet';
+    light.style.background = isLive?'var(--red)':'var(--green)';
+    state.textContent = (isLive?'🔴 ':'● ')+'In Trade'+(t.reconnected?' (reconnected)':'');
+    state.style.color = isLive?'var(--red)':'var(--green)';
+    box.style.borderLeftColor = isLive?'var(--red)':'var(--green)';
+    box.style.background = isLive?'var(--red-bg)':'var(--green-bg)';
+    let trailTxt='';
+    if($('trailOn')?.checked && t.curSL){
+      const locked=(t.side==='buy')?(t.curSL-t.entry):(t.entry-t.curSL);
+      trailTxt=`<br><span style="color:var(--gold-dim)">⤴ SL ${t.curSL} · TP ${t.curTP} · step ${t.steps||0}</span> ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
+    }
+    detail.innerHTML=`<b style="color:var(--txt)">${t.sym||cur?.symbol||'position'}</b> · Holding <b>${(t.side||'').toUpperCase()}</b> ${t.size} @ ${fmt(t.entry,priceDp())}${trailTxt}<br><span class="dim">Managed until SL/TP closes it. Won't open another until then.</span>`;
+    return;
+  }
 
   if(!engineOn){
     light.style.background='var(--muted)';
