@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v33</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v34</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -266,9 +266,20 @@ if(sessionStorage.getItem('dx_auth')==='1'){
               <div class="sig-cell"><div class="lbl">Funding</div><div class="val" id="sFund">—</div></div>
             </div>
           </div>
+          <!-- MASTER TOGGLE -->
+          <div style="background:var(--navy);border-radius:9px;padding:14px 16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="color:#fff;font-weight:700;font-size:14px;letter-spacing:.3px">Start Robot</div>
+              <div style="color:#b9c4d6;font-size:11px;margin-top:2px">Engine + Auto-Pilot + Trailing — stays on across refresh</div>
+            </div>
+            <div class="sw gold" id="tglMaster" onclick="toggleMaster(this)" style="transform:scale(1.15)"></div>
+          </div>
+          <div id="masterMsg" style="font-size:11px;margin-bottom:10px;min-height:0"></div>
+          <details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:11px;color:var(--muted);font-weight:600">Individual controls</summary>
           <div class="toggle-row"><label>Engine</label><div class="sw" id="tglEngine" onclick="toggleSwitch('sigOn',this)"></div></div>
           <div class="toggle-row"><label>Auto-Pilot</label><div class="sw" id="tglAuto" onclick="toggleSwitch('autoExec',this)"></div></div>
           <div class="toggle-row"><label>Trailing Profit-Lock</label><div class="sw" id="tglTrail" onclick="toggleSwitch('trailOn',this)"></div></div>
+          </details>
           <input type="checkbox" id="sigOn" class="hidden"><input type="checkbox" id="autoExec" class="hidden"><input type="checkbox" id="trailOn" class="hidden">
           <div id="autoExecMsg" class="hidden"></div>
         </div>
@@ -382,7 +393,41 @@ function syncToggles(){
     const cb=document.getElementById(c),tg=document.getElementById(t);
     if(cb&&tg)tg.classList.toggle('on',cb.checked);
   });
+  // master reflects the combined state
+  const m=document.getElementById('tglMaster');
+  const on=document.getElementById('sigOn')?.checked && document.getElementById('autoExec')?.checked;
+  if(m)m.classList.toggle('on',!!on);
 }
+// MASTER: one switch → engine + auto-pilot + trailing, persisted across refresh
+function toggleMaster(el){
+  const turnOn=!el.classList.contains('on');
+  if(turnOn){
+    setMasterState(true);
+  }else{
+    setMasterState(false);
+  }
+}
+function setMasterState(on, silent){
+  const sig=document.getElementById('sigOn'), ae=document.getElementById('autoExec'), tr=document.getElementById('trailOn');
+  if(on){
+    sig.checked=true; tr.checked=true;
+    localStorage.setItem('dx_master','1');
+    localStorage.setItem('dx_engineOn','1');
+    sig.dispatchEvent(new Event('change'));
+    tr.dispatchEvent(new Event('change'));
+    // auto-pilot needs its arm flow (handles LIVE confirm); trigger via checkbox change
+    if(!ae.checked){ ae.checked=true; ae.dispatchEvent(new Event('change')); }
+  }else{
+    localStorage.setItem('dx_master','0');
+    localStorage.setItem('dx_engineOn','0');
+    if(ae.checked){ ae.checked=false; ae.dispatchEvent(new Event('change')); }
+    sig.checked=false; sig.dispatchEvent(new Event('change'));
+    // leave trailing on — harmless without auto-pilot; or turn off:
+    tr.checked=false; tr.dispatchEvent(new Event('change'));
+  }
+  syncToggles();
+}
+window.toggleMaster=toggleMaster; window.setMasterState=setMasterState;
 /* ===== UI BRIDGE: new sci-fi shell → existing engine ===== */
 function toggleSwitch(checkboxId, el){
   const cb=document.getElementById(checkboxId);
@@ -575,7 +620,6 @@ function toggleCfg(){
 }
 function setEnv(e){
   ENV=e; localStorage.setItem('dx_env',e);
-  if(e!=='testnet'){const ae=$('autoExec');if(ae)ae.checked=false;if(typeof stopRobotLoop==='function')stopRobotLoop();}
   refreshEnvUI();
   if(typeof updateRobotStatus==='function')updateRobotStatus();
   loadProducts(); loadBalance();
@@ -589,10 +633,9 @@ function refreshEnvUI(){
   const el=$('envLabel'); if(el)el.textContent=live?'⚠ real money':'✓ fake money — safe to test';
   const pill=$('envPill');
   if(pill){pill.textContent=live?'LIVE':'TESTNET';pill.style.color='#fff';pill.style.background=live?'var(--red)':'var(--green)';}
-  // auto-exec: allowed on live now, but ALWAYS disarmed on env switch (must re-arm deliberately)
+  // auto-exec: allowed on live. Master toggle controls arming; don't force-disarm here.
   const ae=$('autoExec'), aem=$('autoExecMsg');
   if(ae){
-    ae.checked=false;  // switching env always turns auto-pilot off — you must re-arm on purpose
     ae.disabled=false;
     if(live){
       if(aem)aem.innerHTML='<span class="r">⚠ LIVE — real money. Arming auto-pilot will place REAL trades. Keep size tiny.</span>';
@@ -1447,30 +1490,35 @@ $('sigOn')?.addEventListener('change',()=>{
   if($('sigOn').checked)log('✓ engine ON — watching market');
   else log('engine OFF');
 });
+let silentArm=false;   // set true when auto-resuming from saved master state
 $('autoExec')?.addEventListener('change',()=>{
   if($('autoExec').checked){
     if(!$('sigOn').checked){
-      alert('Turn the Engine ON first, then arm auto-execute.');
+      if(!silentArm)alert('Turn the Engine ON first, then arm auto-execute.');
       $('autoExec').checked=false;
+    }else if(silentArm){
+      // resuming from saved master state — no dialog, but give a live cancel window
+      const isLive = ENV!=='testnet';
+      log(isLive?'🔴 auto-resumed on LIVE (from saved Start Robot)':'🤖 auto-resumed (testnet)');
+      startRobotLoop();
     }else{
       const mode=$('sizeMode').value, pct=$('botPct').value, minS=$('botScore').value;
       const sizeDesc = mode==='pct' ? `${pct}% of balance (auto lots per coin)` : `${pct} fixed contracts`;
       const isLive = ENV!=='testnet';
       let ok;
       if(isLive){
-        // strong two-step confirmation for REAL money
-        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\nDaily loss limit: ${$('dailyLimit').value||'NOT SET — please set one!'}\n\nYour own testnet results showed this signal roughly breaks even before fees. Only proceed with money you can fully afford to lose.\n\nContinue?`);
+        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\nDaily loss limit: ${$('dailyLimit').value||'NOT SET — please set one!'}\n\nOnce ON, it STAYS ON across refreshes until you turn it off.\n\nContinue?`);
         if(ok){
           const typed=prompt('Type  LIVE  (in capitals) to confirm real-money auto-trading:');
           if((typed||'').trim()!=='LIVE'){ok=false;}
         }
       }else{
-        ok=confirm(`ARM THE AUTO-PICK ROBOT?\n\nEnvironment: TESTNET (fake money)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\n\nThe robot scans the market, picks the strongest coin, sizes from your balance %, and trades one at a time.\n\nConfirm to arm?`);
+        ok=confirm(`ARM THE AUTO-PICK ROBOT?\n\nEnvironment: TESTNET (fake money)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\n\nStays ON across refreshes until you turn it off.\n\nConfirm to arm?`);
       }
       if(ok){
         log(isLive?'🔴 ROBOT ARMED ON LIVE — REAL MONEY — auto-picking':'🤖 ROBOT ARMED (testnet) — auto-picking best coin');
         startRobotLoop();
-      }else $('autoExec').checked=false;
+      }else{ $('autoExec').checked=false; localStorage.setItem('dx_master','0'); }
     }
   }else{
     log('🤖 robot disarmed');
@@ -1487,8 +1535,40 @@ $('autoExec')?.addEventListener('change',()=>{
   el.addEventListener('input',()=>{localStorage.setItem('dx_set_'+id,el.value);updateSizeCalc();updateRobotStatus();cloudSaveSoon();});
   el.addEventListener('change',()=>{localStorage.setItem('dx_set_'+id,el.value);updateSizeCalc();cloudSaveSoon();});
 });
-// restore engine/auto toggles (but NOT auto-arm silently — see note)
+// restore engine state
 if(localStorage.getItem('dx_engineOn')==='1'){const s=$('sigOn');if(s){s.checked=true;}}
+// AUTO-RESUME master (Start Robot) if it was left on — survives refresh
+if(localStorage.getItem('dx_master')==='1'){
+  const isLive = ENV!=='testnet';
+  const resume=()=>{
+    silentArm=true;
+    $('sigOn').checked=true; $('sigOn').dispatchEvent(new Event('change'));
+    $('trailOn').checked=true; $('trailOn').dispatchEvent(new Event('change'));
+    $('autoExec').checked=true; $('autoExec').dispatchEvent(new Event('change'));
+    silentArm=false;
+    syncToggles(); updateRobotStatus();
+  };
+  if(isLive){
+    // 6-second cancel window so an unattended reload can still be stopped
+    let sec=6;
+    const mm=$('masterMsg');
+    if(mm)mm.innerHTML='<span class="r" style="font-weight:600">🔴 Auto-resuming LIVE robot in '+sec+'s… <button onclick="cancelResume()" style="padding:3px 10px;font-size:11px">CANCEL</button></span>';
+    window._resumeTimer=setInterval(()=>{
+      sec--;
+      if(sec<=0){clearInterval(window._resumeTimer);if(mm)mm.innerHTML='';resume();}
+      else if(mm)mm.innerHTML='<span class="r" style="font-weight:600">🔴 Auto-resuming LIVE robot in '+sec+'s… <button onclick="cancelResume()" style="padding:3px 10px;font-size:11px">CANCEL</button></span>';
+    },1000);
+  }else{
+    setTimeout(resume,500);
+  }
+}
+function cancelResume(){
+  clearInterval(window._resumeTimer);
+  localStorage.setItem('dx_master','0');
+  const mm=$('masterMsg');if(mm)mm.innerHTML='<span class="dim">Auto-resume cancelled. Robot stays off.</span>';
+  setMasterState(false);
+}
+window.cancelResume=cancelResume;
 updateSizeCalc();
 $('sizeMode')?.addEventListener('change',()=>{localStorage.setItem('dx_set_sizeMode',$('sizeMode').value);updateSizeCalc();});
 $('botPct')?.addEventListener('input',()=>{localStorage.setItem('dx_set_botPct',$('botPct').value);updateSizeCalc();});
