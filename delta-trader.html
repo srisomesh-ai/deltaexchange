@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v37</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v38</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -1121,6 +1121,15 @@ try{const rt=localStorage.getItem('dx_robotTrade');if(rt)robotOpenTrade=JSON.par
 // ===== STEPPED TRAILING STOP + MOVING TP =====
 let trailBusy=false;
 async function trailMonitor(){
+  // periodic naked-position safety check (every ~30s) regardless of trailing toggle
+  if(robotOpenTrade && robotOpenTrade.prodId && !trailBusy){
+    const now=Date.now();
+    if(now-(window._lastProtCheck||0) > 30000){
+      window._lastProtCheck=now;
+      const prod=products.find(p=>p.id===robotOpenTrade.prodId||p.symbol===robotOpenTrade.sym);
+      if(prod)verifyProtection(prod, robotOpenTrade.side, robotOpenTrade.size, robotOpenTrade.curSL||robotOpenTrade.entry, robotOpenTrade.curTP||robotOpenTrade.entry);
+    }
+  }
   if(!$('trailOn')?.checked) return;
   if(!robotOpenTrade || !robotOpenTrade.prodId) return;
   if(trailBusy) return;
@@ -1357,6 +1366,42 @@ function updateSizeCalc(){
 }
 
 // ===== SCANNER-DRIVEN ROBOT: auto-picks best coin from scan, trades it =====
+// ── SAFETY NET: make sure an open position always has a stop-loss ──
+// Runs a few seconds after entry. If no protective stop order exists, places one.
+async function verifyProtection(prod, side, size, sl, tp){
+  try{
+    // is there actually a position?
+    const pj=await proxy('GET','/v2/positions/margined');
+    const pos=(pj.result||[]).find(p=>(p.product_id===prod.id||p.product_symbol===prod.symbol)&&+p.size!==0);
+    if(!pos){return;} // no position (maybe already closed) — nothing to protect
+    // check for existing stop orders on this product
+    const oj=await proxy('GET','/v2/orders',{query:'?product_ids='+prod.id+'&states=open,pending'});
+    const orders=oj.result||[];
+    const hasStop=orders.some(o=>(o.stop_order_type||o.order_type||'').toLowerCase().includes('stop') || o.stop_price || o.bracket_stop_loss_price || o.is_bracket_order);
+    if(hasStop){log('   ✓ stop-loss confirmed active on '+prod.symbol);return;}
+    // NO STOP FOUND — place a standalone protective stop-loss now
+    log('   ⚠ NO stop-loss detected on '+prod.symbol+' — placing protective stop now');
+    const closeSide = side==='buy'?'sell':'buy';  // opposite side to close
+    const body={
+      product_id:prod.id, product_symbol:prod.symbol,
+      size:Math.abs(+pos.size), side:closeSide,
+      order_type:'market_order',
+      stop_order_type:'stop_loss_order',
+      stop_price:String(sl),
+      stop_trigger_method:'mark_price',
+      reduce_only:true
+    };
+    const r=await proxy('POST','/v2/orders',{body});
+    if(r.success===false){
+      log('   🛑 FALLBACK STOP FAILED: '+JSON.stringify(r.error)+' — CLOSE THIS TRADE MANUALLY');
+      // last resort: alert visibly in status
+      const rd=$('rsDetail'); if(rd)rd.innerHTML='<b class="r">⚠ POSITION HAS NO STOP-LOSS — close it manually on Delta!</b>';
+    }else{
+      log('   🛡 protective stop-loss placed at '+sl+' ✓');
+    }
+  }catch(e){log('   ⚠ protection check error: '+e.message+' — verify SL manually');}
+}
+
 let robotLoopTimer=null;
 function startRobotLoop(){
   if(robotLoopTimer)return;
@@ -1442,7 +1487,7 @@ async function robotTick(){
     const lev=parseInt($('lev').value)||10;
     await proxy('POST','/v2/products/'+prod.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
     const jr=await proxy('POST','/v2/orders',{body});
-    if(jr.success===false){log('🤖✗ '+pick.sym+' rejected: '+JSON.stringify(jr.error));}
+    if(jr.success===false){log('🤖✗ '+pick.sym+' rejected: '+JSON.stringify(jr.error));botBusy=false;return;}
     else{
       robotOpenTrade={side:botSide,entry:mark,size,sym:pick.sym,
         prodId:prod.id, tick, slP, tpP,
@@ -1454,6 +1499,8 @@ async function robotTick(){
       log(`🤖✓ ${botSide.toUpperCase()} ${size} ${pick.sym} @${fmt(mark,priceDp())}  SL ${sl} TP ${tp}  (strength ${(pick.strength*100).toFixed(0)})`);
       if($('trailOn')?.checked)log('   ⤴ trailing armed — step '+((+$('trailStep')?.value||slP))+'%');
       updateRobotStatus();
+      // ── CRITICAL: verify the bracket actually attached; if not, protect the position ──
+      setTimeout(()=>verifyProtection(prod, botSide, size, sl, tp), 4000);
       loadPositions();
     }
   }catch(e){log('🤖 loop error: '+e.message);}
