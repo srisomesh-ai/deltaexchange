@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v35</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v36</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -1377,13 +1377,20 @@ async function robotTick(){
   botBusy=true;
   try{
     await runScan();
-    const minStr=+($('botScore').value||0.55);
-    // pick strongest coin that: has direction, clears strength, and NOT recently traded
-    const pick=lastScan.find(c=>c.dir!=='—' && c.strength>=minStr && !recentCoins.includes(c.sym));
+    const minStr=+($('botScore').value||0.30);
+    // count how many coins pass each gate — so waiting is explainable
+    const directional=lastScan.filter(c=>c.dir!=='—');
+    const strongEnough=directional.filter(c=>c.strength>=minStr);
+    const notRecent=strongEnough.filter(c=>!recentCoins.includes(c.sym));
+    const pick=notRecent[0];
     if(!pick){
-      const best=lastScan.find(c=>c.dir!=='—' && !recentCoins.includes(c.sym));
-      const bestTxt = best ? `best is ${best.sym} at ${best.strength.toFixed(2)} (need ${minStr})` : 'no directional coin found';
-      log('🤖 waiting — '+bestTxt+(recentCoins.length?' · skipping recent: '+recentCoins.join(','):''));
+      const best=directional[0];
+      let why='';
+      if(!directional.length) why='no coin has a clear direction right now';
+      else if(!strongEnough.length) why=`${directional.length} coins have direction but none reach strength ${minStr} (best: ${best.sym} ${best.strength.toFixed(2)})`;
+      else why=`${strongEnough.length} qualify but all recently traded (${recentCoins.join(', ')})`;
+      log('🤖 waiting — '+why);
+      const rd=$('rsDetail'); if(rd && $('autoExec')?.checked)rd.innerHTML='<b>Scanning…</b> '+why;
       botBusy=false;return;
     }
 
@@ -1398,7 +1405,7 @@ async function robotTick(){
       const wantLong = pick.dir==='LONG';
       const agrees = (wantLong && tr.dir!=='down') || (!wantLong && tr.dir!=='up');
       if(!agrees){
-        log(`🤖 skipped ${pick.sym} ${pick.dir} — fights ${tr.dir}trend (trend ${tr.trend>=0?'+':''}${tr.trend})`);
+        log(`🤖 skipped ${pick.sym} ${pick.dir} — fights ${tr.dir}trend (trend ${tr.trend>=0?'+':''}${tr.trend}). Turn off Trend filter to allow it.`);
         recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);  // skip it this round
         botBusy=false;return;
       }
