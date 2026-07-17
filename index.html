@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v30</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v31</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -677,14 +677,31 @@ async function loadPositions(){
   try{
     const j=await proxy('GET','/v2/positions/margined');
     const rows=(j.result||[]).filter(p=>+p.size!==0);
-    // if robot had a trade and now no position on symbol, it closed
+    // RECONNECT: if a position is live on Delta but the page forgot it (after refresh), rebuild it
+    if(!robotOpenTrade && rows.length){
+      const p=rows[0];
+      const prod=products.find(x=>x.symbol===p.product_symbol||x.id===p.product_id);
+      robotOpenTrade={
+        side:(+p.size>0?'buy':'sell'),
+        entry:+p.entry_price, size:Math.abs(+p.size),
+        sym:p.product_symbol||prod?.symbol,
+        prodId:p.product_id||prod?.id,
+        reconnected:true
+      };
+      saveRobotTrade();
+      log('🔄 reconnected to live position: '+robotOpenTrade.sym+' '+robotOpenTrade.side.toUpperCase()+' '+robotOpenTrade.size+' @ '+fmt(robotOpenTrade.entry,priceDp()));
+      updateRobotStatus();
+    }
+    // if robot had a trade and now no position on ITS symbol, it closed
     if(robotOpenTrade){
-      const stillOpen=(j.result||[]).some(p=>+p.size!==0 && (p.product_symbol===cur.symbol||p.product_id===cur.id));
+      const rSym=robotOpenTrade.sym||cur?.symbol;
+      const rId=robotOpenTrade.prodId||cur?.id;
+      const stillOpen=(j.result||[]).some(p=>+p.size!==0 && (p.product_symbol===rSym||p.product_id===rId));
       if(!stillOpen){
         // robot trade closed — record outcome for tuning stats
         recordRobotClose();
         log('   🤖 position closed (SL/TP hit) — robot free to trade again');
-        robotOpenTrade=null;updateRobotStatus();
+        robotOpenTrade=null;saveRobotTrade();updateRobotStatus();
       }
     }
     // feed live PnL into the risk guard
@@ -1019,6 +1036,10 @@ function runSignal(imb){
 }
 
 let robotOpenTrade=null;   // tracks current robot position {side,entry,size}
+// persist the robot trade so a refresh can reconnect to the live position
+function saveRobotTrade(){try{robotOpenTrade?localStorage.setItem('dx_robotTrade',JSON.stringify(robotOpenTrade)):localStorage.removeItem('dx_robotTrade');}catch(e){}}
+// on load, restore any saved robot trade (details like entry/SL/TP for trailing)
+try{const rt=localStorage.getItem('dx_robotTrade');if(rt)robotOpenTrade=JSON.parse(rt);}catch(e){}
 
 // ===== STEPPED TRAILING STOP + MOVING TP =====
 let trailBusy=false;
@@ -1259,6 +1280,7 @@ async function robotTick(){
         prodId:prod.id, tick, slP, tpP,
         curSL:+sl, curTP:+tp, steps:0, lastStepPrice:mark,
         stepPct:(+$('trailStep')?.value||slP)};   // step size % (defaults to SL%)
+      saveRobotTrade();
       lastTradeTime=Date.now();
       recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);  // avoid last 3 coins
       log(`🤖✓ ${botSide.toUpperCase()} ${size} ${pick.sym} @${fmt(mark,priceDp())}  SL ${sl} TP ${tp}  (strength ${(pick.strength*100).toFixed(0)})`);
@@ -1300,6 +1322,7 @@ async function maybeAutoExecute(dir, score, mark){
     if(j.success===false){log('   🤖✗ rejected: '+JSON.stringify(j.error));}
     else{
       robotOpenTrade={side:botSide,entry:mark,size};
+      saveRobotTrade();
       log(`   🤖✓ ${botSide.toUpperCase()} ${size} @mkt  SL ${sl} TP ${tp}  id=${j.result?.id}`);
       updateRobotStatus();
       loadPositions();
@@ -1402,7 +1425,18 @@ updateSizeCalc();
 ['botSize','botScore'].forEach(id=>$(id)?.addEventListener('input',updateRobotStatus));
 updateRobotStatus();
 loadProducts();
-if(PROXY){setTimeout(loadBalance,800);}
+if(PROXY){
+  setTimeout(loadBalance,800);
+  // reconnect to any live robot position after products load (needs products list)
+  setTimeout(()=>{
+    loadPositions().then(()=>{
+      if(robotOpenTrade){
+        log('🤖 robot trade active on load: '+robotOpenTrade.sym+' '+robotOpenTrade.side.toUpperCase());
+        updateRobotStatus();
+      }
+    });
+  },1500);
+}
 onType();
 // show restored journal count
 if($('jCount'))$('jCount').textContent=journal.length;
