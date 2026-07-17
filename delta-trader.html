@@ -171,7 +171,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </div>
 
 <div class="wrap">
-  <div class="warn">Market data is live. Orders route through your signed proxy. Auto-pilot is testnet-locked until proven profitable.</div>
+  <div class="warn">Market data is live. Orders route through your signed proxy. Auto-pilot can trade LIVE — keep size tiny and set a daily loss limit.</div>
 
   <!-- uplink -->
   <div class="card" style="margin-bottom:18px">
@@ -588,11 +588,17 @@ function refreshEnvUI(){
   const el=$('envLabel'); if(el)el.textContent=live?'⚠ real money':'✓ fake money — safe to test';
   const pill=$('envPill');
   if(pill){pill.textContent=live?'LIVE':'TESTNET';pill.style.color='#fff';pill.style.background=live?'var(--red)':'var(--green)';}
-  // auto-exec only allowed on testnet
+  // auto-exec: allowed on live now, but ALWAYS disarmed on env switch (must re-arm deliberately)
   const ae=$('autoExec'), aem=$('autoExecMsg');
   if(ae){
-    if(live){ae.checked=false;ae.disabled=true;if(aem)aem.innerHTML='<span class="r">🔒 Auto-execute locked on LIVE. Switch to TESTNET to let the robot trade.</span>';}
-    else{ae.disabled=false;if(aem)aem.innerHTML='Places real orders on strong signals, with bracket SL/TP. One position at a time. <span class="g">Testnet — safe.</span>';}
+    ae.checked=false;  // switching env always turns auto-pilot off — you must re-arm on purpose
+    ae.disabled=false;
+    if(live){
+      if(aem)aem.innerHTML='<span class="r">⚠ LIVE — real money. Arming auto-pilot will place REAL trades. Keep size tiny.</span>';
+    }else{
+      if(aem)aem.innerHTML='Places orders on strong signals, with bracket SL/TP. One position at a time. <span class="g">Testnet — safe.</span>';
+    }
+    if(typeof syncToggles==='function')syncToggles();
   }
 }
 
@@ -1052,17 +1058,23 @@ function updateRobotStatus(){
     detail.innerHTML='Engine is scanning &amp; logging signals but <b>will not place orders</b>. Turn on Auto-Pilot to arm.';
     return;
   }
-  if(ENV!=='testnet'){
+  const isLive = ENV!=='testnet';
+  if(isLive){
     light.style.background='var(--red)';
-    state.textContent='Blocked (live mode)';state.style.color='var(--red)';
+    state.textContent = robotOpenTrade ? '🔴 In Trade — LIVE' : '🔴 Armed on LIVE — real money';
+    state.style.color='var(--red)';
     box.style.borderLeftColor='var(--red)';box.style.background='var(--red-bg)';
-    detail.innerHTML='Auto-Pilot is locked on LIVE. Switch to <b>TESTNET</b> to let the robot trade.';
-    return;
+    if(!robotOpenTrade){
+      detail.innerHTML='<b>Trading with REAL money.</b> Robot scans &amp; picks the strongest coin. Keep size tiny and watch it.';
+      return;
+    }
+    // fall through to show trade details below
+  }else{
+    light.style.background='var(--green)';
+    state.textContent = robotOpenTrade ? '● In Trade' : '✓ Armed — Auto-Picking';
+    state.style.color='var(--green)';
+    box.style.borderLeftColor='var(--green)';box.style.background='var(--green-bg)';
   }
-  light.style.background='var(--green)';
-  state.textContent = robotOpenTrade ? '● In Trade' : '✓ Armed — Auto-Picking';
-  state.style.color='var(--green)';
-  box.style.borderLeftColor='var(--green)';box.style.background='var(--green-bg)';
   if(robotOpenTrade){
     const t=robotOpenTrade;
     let trailTxt='';
@@ -1161,8 +1173,11 @@ function stopRobotLoop(){ clearInterval(robotLoopTimer); robotLoopTimer=null; }
 
 async function robotTick(){
   if(!$('autoExec')?.checked || !$('sigOn')?.checked) return;
-  if(ENV!=='testnet') return;
   if(botBusy || robotOpenTrade) return;   // one position at a time
+  if(typeof guardBlocks==='function' && guardBlocks()){
+    log('🛑 daily loss limit hit — robot paused, no new entries');
+    return;
+  }
 
   // COOLDOWN: don't fire again too soon after last trade (anti over-trading / fee bleed)
   const cooldownMin=+($('botCooldown')?.value||3);
@@ -1232,7 +1247,6 @@ async function robotTick(){
 async function maybeAutoExecute(dir, score, mark){
   const ae=$('autoExec');
   if(!ae?.checked) return;
-  if(ENV!=='testnet'){log('   ⚠ auto-exec ignored (not testnet)');return;}
   const minScore=+$('botScore').value||0.45;
   if(Math.abs(score)<minScore){log(`   ·score ${score.toFixed(2)} < min ${minScore}, no trade`);return;}
   if(botBusy)return;
@@ -1316,18 +1330,28 @@ $('sigOn')?.addEventListener('change',()=>{
 });
 $('autoExec')?.addEventListener('change',()=>{
   if($('autoExec').checked){
-    if(ENV!=='testnet'){
-      alert('Auto-execute is locked on LIVE.\nSwitch to TESTNET first to let the robot trade with fake money.');
-      $('autoExec').checked=false;
-    }else if(!$('sigOn').checked){
+    if(!$('sigOn').checked){
       alert('Turn the Engine ON first, then arm auto-execute.');
       $('autoExec').checked=false;
     }else{
       const mode=$('sizeMode').value, pct=$('botPct').value, minS=$('botScore').value;
       const sizeDesc = mode==='pct' ? `${pct}% of balance (auto lots per coin)` : `${pct} fixed contracts`;
-      const ok=confirm(`ARM THE AUTO-PICK ROBOT?\n\nEnvironment: TESTNET (fake money)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\n\nThe robot SCANS the whole market, picks the STRONGEST coin, sizes from your balance %, and trades it — one at a time. It chooses the coin.\n\nConfirm to arm?`);
-      if(ok){log('🤖 ROBOT ARMED — auto-picking best coin from scanner');startRobotLoop();}
-      else $('autoExec').checked=false;
+      const isLive = ENV!=='testnet';
+      let ok;
+      if(isLive){
+        // strong two-step confirmation for REAL money
+        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\nDaily loss limit: ${$('dailyLimit').value||'NOT SET — please set one!'}\n\nYour own testnet results showed this signal roughly breaks even before fees. Only proceed with money you can fully afford to lose.\n\nContinue?`);
+        if(ok){
+          const typed=prompt('Type  LIVE  (in capitals) to confirm real-money auto-trading:');
+          if((typed||'').trim()!=='LIVE'){ok=false;}
+        }
+      }else{
+        ok=confirm(`ARM THE AUTO-PICK ROBOT?\n\nEnvironment: TESTNET (fake money)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('slPct').value}% / TP ${$('tpPct').value}%\n\nThe robot scans the market, picks the strongest coin, sizes from your balance %, and trades one at a time.\n\nConfirm to arm?`);
+      }
+      if(ok){
+        log(isLive?'🔴 ROBOT ARMED ON LIVE — REAL MONEY — auto-picking':'🤖 ROBOT ARMED (testnet) — auto-picking best coin');
+        startRobotLoop();
+      }else $('autoExec').checked=false;
     }
   }else{
     log('🤖 robot disarmed');
