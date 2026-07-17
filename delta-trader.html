@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v38</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v39</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -1241,7 +1241,8 @@ function updateRobotStatus(){
     if($('trailOn')?.checked && t.curSL){
       const locked=(t.side==='buy')?(t.curSL-t.entry):(t.entry-t.curSL);
       const beBadge = t.beLocked ? ' <span class="g">🛡 breakeven-safe</span>' : '';
-      trailTxt=`<br><span style="color:var(--gold-dim)">⤴ SL ${t.curSL} · TP ${t.curTP} · step ${t.steps||0}</span>${beBadge} ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
+      const dirNote = t.side==='sell' ? '(short: SL above, TP below)' : '(long: SL below, TP above)';
+      trailTxt=`<br><span style="color:var(--gold-dim)">⤴ SL ${t.curSL} · TP ${t.curTP} · step ${t.steps||0}</span> <span class="dim" style="font-size:10px">${dirNote}</span>${beBadge} ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
     }
     detail.innerHTML=`<b style="color:var(--txt)">${t.sym||cur?.symbol||'position'}</b> · Holding <b>${(t.side||'').toUpperCase()}</b> ${t.size} @ ${fmt(t.entry,priceDp())}${trailTxt}<br><span class="dim">Managed until SL/TP closes it. Won't open another until then.</span>`;
     return;
@@ -1468,6 +1469,8 @@ async function robotTick(){
     if(!prod){log('🤖 product not found for '+pick.sym);botBusy=false;return;}
     // load it into the UI too so the user sees what the robot is trading
     selectSymbol(pick.sym);
+    // sync the manual side + buttons to the robot's direction so the SL/TP preview is correct
+    if(typeof setSide==='function')setSide(pick.dir==='LONG'?'buy':'sell');
 
     const botSide = pick.dir==='LONG'?'buy':'sell';
     const mark=pick.mark;
