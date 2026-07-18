@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v41</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v42</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -732,16 +732,30 @@ async function loadPositions(){
     // RECONNECT: if a position is live on Delta but the page forgot it (after refresh), rebuild it
     if(!robotOpenTrade && rows.length){
       const p=rows[0];
+      // one-time diagnostic: show what fields Delta actually returns so we use the right one
+      if(!window._posFieldsLogged){window._posFieldsLogged=true;log('🔍 position fields: '+Object.keys(p).join(', '));}
       const prod=products.find(x=>x.symbol===p.product_symbol||x.id===p.product_id);
+      // Determine side RELIABLY. Delta size sign is not a safe indicator across product types.
+      // Prefer explicit fields; fall back to size sign only if nothing else exists.
+      let sideVal=null;
+      const sz=+p.size;
+      if(p.side) sideVal = String(p.side).toLowerCase();               // some responses include 'side'
+      else if(p.margin_mode && p.realized_pnl!==undefined && sz!==0) sideVal = sz>0?'buy':'sell';
+      else sideVal = sz>0?'buy':'sell';
+      // SANITY: if the dashboard can't be sure, flag it rather than guess wrong
+      const uncertainSide = !p.side;
       robotOpenTrade={
-        side:(+p.size>0?'buy':'sell'),
-        entry:+p.entry_price, size:Math.abs(+p.size),
+        side:sideVal,
+        entry:+p.entry_price, size:Math.abs(sz),
         sym:p.product_symbol||prod?.symbol,
         prodId:p.product_id||prod?.id,
-        reconnected:true
+        reconnected:true, uncertainSide
       };
       saveRobotTrade();
-      log('🔄 reconnected to live position: '+robotOpenTrade.sym+' '+robotOpenTrade.side.toUpperCase()+' '+robotOpenTrade.size+' @ '+fmt(robotOpenTrade.entry,priceDp()));
+      log('🔄 reconnected: '+robotOpenTrade.sym+' '+robotOpenTrade.side.toUpperCase()+' '+robotOpenTrade.size+' @ '+fmt(robotOpenTrade.entry,priceDp())+(uncertainSide?' ⚠ side inferred — VERIFY on Delta':''));
+      if(uncertainSide){
+        const rd=$('rsDetail'); if(rd)rd.innerHTML='<b class="r">⚠ Reconnected trade: side could not be confirmed. Check the position on Delta and close manually if unsure.</b>';
+      }
       updateRobotStatus();
     }
     // if robot had a trade and now no position on ITS symbol, it closed
