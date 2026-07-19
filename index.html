@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v43</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v44</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -773,8 +773,10 @@ async function loadPositions(){
       if(!stillOpen){
         // robot trade closed — record outcome for tuning stats
         recordRobotClose();
+        const closedProdId=robotOpenTrade.prodId;
         log('   🤖 position closed (SL/TP hit) — robot free to trade again');
         robotOpenTrade=null;saveRobotTrade();updateRobotStatus();
+        if(closedProdId)cleanupStops(closedProdId);
       }
     }
     // feed live PnL into the risk guard
@@ -1431,25 +1433,55 @@ async function verifyProtection(prod, side, size, sl, tp){
     if(hasStop){log('   ✓ stop-loss confirmed active on '+prod.symbol);return;}
     // NO STOP FOUND — place a standalone protective stop-loss now
     log('   ⚠ NO stop-loss detected on '+prod.symbol+' — placing protective stop now');
-    const closeSide = side==='buy'?'sell':'buy';  // opposite side to close
-    const body={
-      product_id:prod.id, product_symbol:prod.symbol,
-      size:Math.abs(+pos.size), side:closeSide,
-      order_type:'market_order',
-      stop_order_type:'stop_loss_order',
-      stop_price:String(sl),
-      stop_trigger_method:'mark_price',
-      reduce_only:true
+    const placeStop=async(closeSide)=>{
+      const body={
+        product_id:prod.id, product_symbol:prod.symbol,
+        size:Math.abs(+pos.size), side:closeSide,
+        order_type:'market_order',
+        stop_order_type:'stop_loss_order',
+        stop_price:String(sl),
+        stop_trigger_method:'mark_price',
+        reduce_only:true
+      };
+      return proxy('POST','/v2/orders',{body});
     };
-    const r=await proxy('POST','/v2/orders',{body});
-    if(r.success===false){
-      log('   🛑 FALLBACK STOP FAILED: '+JSON.stringify(r.error)+' — CLOSE THIS TRADE MANUALLY');
-      // last resort: alert visibly in status
-      const rd=$('rsDetail'); if(rd)rd.innerHTML='<b class="r">⚠ POSITION HAS NO STOP-LOSS — close it manually on Delta!</b>';
+    let closeSide = side==='buy'?'sell':'buy';  // opposite side to close
+    let r=await placeStop(closeSide);
+    // SELF-CORRECTION: if rejected, or if it exists then instantly vanishes (Delta cancels
+    // wrong-side reduce-only stops — see Delta email), flip the side and retry once.
+    const rejected = r.success===false && JSON.stringify(r.error||'').toLowerCase().includes('reduce');
+    let placedOk = r.success!==false;
+    if(placedOk){
+      await new Promise(res=>setTimeout(res,2500));
+      const chk=await proxy('GET','/v2/orders',{query:'?product_ids='+prod.id+'&states=open,pending'});
+      const still=(chk.result||[]).some(o=>(o.stop_order_type||'').toLowerCase().includes('stop')||o.stop_price);
+      if(!still){placedOk=false;log('   ↺ stop was cancelled by exchange (wrong side?) — flipping side and retrying');}
+    }
+    if(!placedOk || rejected){
+      const flipped = closeSide==='sell'?'buy':'sell';
+      const r2=await placeStop(flipped);
+      if(r2.success!==false){
+        log('   🛡 protective stop placed with FLIPPED side ('+flipped.toUpperCase()+') — dashboard had the direction wrong; correcting record');
+        // correct the stored trade side to match reality
+        if(robotOpenTrade){robotOpenTrade.side = flipped==='sell'?'buy':'sell'; saveRobotTrade(); updateRobotStatus();}
+      }else{
+        log('   🛑 STOP FAILED BOTH SIDES: '+JSON.stringify(r2.error)+' — CLOSE THIS TRADE MANUALLY');
+        const rd=$('rsDetail'); if(rd)rd.innerHTML='<b class="r">⚠ POSITION HAS NO STOP-LOSS — close it manually on Delta!</b>';
+      }
     }else{
       log('   🛡 protective stop-loss placed at '+sl+' ✓');
     }
   }catch(e){log('   ⚠ protection check error: '+e.message+' — verify SL manually');}
+}
+// cancel any leftover stop orders after a position closes (prevents orphaned stops triggering later)
+async function cleanupStops(prodId){
+  try{
+    const oj=await proxy('GET','/v2/orders',{query:'?product_ids='+prodId+'&states=open,pending'});
+    for(const o of (oj.result||[])){
+      const isStop=(o.stop_order_type||'').toLowerCase().includes('stop')||o.stop_price;
+      if(isStop && o.id){try{await proxy('DELETE','/v2/orders',{body:{id:o.id,product_id:prodId}});log('   🧹 cleaned up leftover stop order '+o.id);}catch(e){}}
+    }
+  }catch(e){}
 }
 
 let robotLoopTimer=null;
