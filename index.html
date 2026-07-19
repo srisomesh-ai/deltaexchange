@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v42</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v43</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -307,6 +307,13 @@ if(sessionStorage.getItem('dx_auth')==='1'){
             <input type="checkbox" id="trendFilter" checked style="width:auto">
             <span><b>Trend filter</b> — only trade WITH the multi-minute trend (recommended)</span>
           </label>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0 8px;padding:8px;background:var(--green-bg);border-radius:6px">
+            <input type="checkbox" id="fundFilter" checked style="width:auto">
+            <span style="flex:1"><b>Funding edge filter</b> — trade only coins with funding ≥</span>
+            <input id="botMinFund" type="number" step="0.5" value="3" style="width:60px;padding:4px 6px">
+            <span>%</span>
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Your journal data: high-funding coins were the only profitable group (70% wins, +1.58% net). Low-funding coins like BTC lost.</div>
           <input id="botSize" type="hidden" value="1">
           <div id="sizeCalc" class="num" style="font-size:10px;color:var(--muted)"></div>
         </div>
@@ -1476,17 +1483,24 @@ async function robotTick(){
     const directional=lastScan.filter(c=>c.dir!=='—');
     const strongEnough=directional.filter(c=>c.strength>=minStr);
     const notRecent=strongEnough.filter(c=>!recentCoins.includes(c.sym));
-    const pick=notRecent[0];
+    // FUNDING FILTER (data-backed): journal showed high-funding coins are the only profitable group
+    // (>3% funding: 70% wins, +1.58% net; low funding: net loss). Trade only where the edge is.
+    const minFund=+($('botMinFund')?.value||3);
+    const fundOn=$('fundFilter')?.checked;
+    const fundOk = fundOn ? notRecent.filter(c=>Math.abs((c.fr||0)*100)>=minFund) : notRecent;
+    const pick=fundOk[0];
     if(!pick){
       const best=directional[0];
       let why='';
       if(!directional.length) why='no coin has a clear direction right now';
       else if(!strongEnough.length) why=`${directional.length} coins have direction but none reach strength ${minStr} (best: ${best.sym} ${best.strength.toFixed(2)})`;
-      else why=`${strongEnough.length} qualify but all recently traded (${recentCoins.join(', ')})`;
+      else if(!notRecent.length) why=`${strongEnough.length} qualify but all recently traded (${recentCoins.join(', ')})`;
+      else why=`${notRecent.length} qualify but none has funding ≥${minFund}% (edge zone). Best funding: ${(Math.max(...notRecent.map(c=>Math.abs((c.fr||0)*100)))).toFixed(2)}%`;
       log('🤖 waiting — '+why);
       const rd=$('rsDetail'); if(rd && $('autoExec')?.checked)rd.innerHTML='<b>Scanning…</b> '+why;
       botBusy=false;return;
     }
+    if(fundOn)log(`🤖 ${pick.sym} funding ${((pick.fr||0)*100).toFixed(2)}% — in the edge zone ✓`);
 
     // 3. verify no open position anywhere (true one-at-a-time)
     const pj=await proxy('GET','/v2/positions/margined');
@@ -1672,7 +1686,7 @@ $('autoExec')?.addEventListener('change',()=>{
   }
   updateRobotStatus();
 });
-['botPct','botScore','slPct','tpPct','lev','sizeMode','dailyLimit','botCooldown','trailStep','botSL','botTP'].forEach(id=>{
+['botPct','botScore','slPct','tpPct','lev','sizeMode','dailyLimit','botCooldown','trailStep','botSL','botTP','botMinFund'].forEach(id=>{
   const el=$(id); if(!el)return;
   // restore saved value
   const saved=localStorage.getItem('dx_set_'+id);
@@ -1687,6 +1701,10 @@ if(localStorage.getItem('dx_engineOn')==='1'){const s=$('sigOn');if(s){s.checked
 if($('trendFilter')){
   if(localStorage.getItem('dx_trendFilter')==='0')$('trendFilter').checked=false;
   $('trendFilter').addEventListener('change',()=>localStorage.setItem('dx_trendFilter',$('trendFilter').checked?'1':'0'));
+}
+if($('fundFilter')){
+  if(localStorage.getItem('dx_fundFilter')==='0')$('fundFilter').checked=false;
+  $('fundFilter').addEventListener('change',()=>localStorage.setItem('dx_fundFilter',$('fundFilter').checked?'1':'0'));
 }
 // AUTO-RESUME master (Start Robot) if it was left on — survives refresh
 if(localStorage.getItem('dx_master')==='1'){
