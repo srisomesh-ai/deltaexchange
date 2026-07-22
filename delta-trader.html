@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v48</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v49</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -255,6 +255,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
           <div id="robotStatus" class="robot-status">
             <div class="st" id="rsStateWrap"><span id="rsLight" style="width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block"></span><span id="rsState">Robot Off</span></div>
             <div class="dt" id="rsDetail">Turn on the engine, then auto-pilot to arm the robot.</div>
+            <button onclick="whyNoTrades()" style="margin-top:9px;font-size:11px;padding:6px 12px">🔍 Why no trades?</button>
           </div>
           <div class="gauge">
             <div class="dir-big" id="sigDir" style="color:var(--muted)">NEUTRAL</div>
@@ -1493,6 +1494,56 @@ async function cleanupStops(prodId){
   }catch(e){}
 }
 
+// ── ONE-TAP DIAGNOSTIC: checks every gate and reports in plain words ──
+async function whyNoTrades(){
+  const out=[];
+  const say=s=>out.push(s);
+  say('═══ ROBOT DIAGNOSTIC ═══');
+  if(!PROXY){say('❌ Proxy not connected — set URL + token and Connect. Robot cannot do anything.');finish();return;}
+  say('✓ proxy set · env: '+ENV.toUpperCase());
+  if(!products.length){say('❌ No markets loaded — Connect may have failed. Check proxy URL.');finish();return;}
+  say('✓ '+products.length+' markets loaded');
+  say(($('sigOn')?.checked?'✓ Engine ON':'❌ Engine OFF — flip Start Robot'));
+  say(($('autoExec')?.checked?'✓ Auto-Pilot ARMED':'❌ Auto-Pilot OFF — flip Start Robot and confirm the dialog'));
+  if(robotOpenTrade){say('⛔ Robot tracking open trade: '+robotOpenTrade.sym+' '+(robotOpenTrade.side||'').toUpperCase()+' — will not open another until it closes. If old/stuck, close it on Delta.');}
+  try{
+    const pj=await proxy('GET','/v2/positions/margined');
+    const op=(pj.result||[]).find(p=>+p.size!==0);
+    if(op)say('⛔ OPEN POSITION on account: '+(op.product_symbol||op.product_id)+' size '+op.size+' — THIS BLOCKS ALL NEW TRADES. Close it on Delta to unblock.');
+    else say('✓ no open position blocking');
+  }catch(e){say('⚠ could not check positions: '+e.message);}
+  if(typeof guardBlocks==='function'&&guardBlocks())say('⛔ Daily loss limit HIT ('+$('dailyLimit').value+') — no new entries today.');
+  else say('✓ loss guard ok (limit '+($('dailyLimit').value||'none')+', PnL '+($('todayPnl').value||0)+')');
+  try{const tc=JSON.parse(localStorage.getItem('dx_tradeCount')||'{}');const maxT=+($('botMaxTrades')?.value||15);
+    if(tc.d===new Date().toDateString()&&tc.n>=maxT)say('⛔ Daily trade cap reached ('+tc.n+'/'+maxT+').');
+    else say('✓ trade cap ok ('+((tc.d===new Date().toDateString()&&tc.n)||0)+'/'+maxT+')');}catch(e){}
+  const cd=+($('botCooldown')?.value||2), rem=cd*60000-(Date.now()-lastTradeTime);
+  if(lastTradeTime&&rem>0)say('⏳ cooldown: '+Math.ceil(rem/1000)+'s left');else say('✓ no cooldown');
+  say('— scanning market…');
+  try{
+    await runScan();
+    const minStr=+($('botScore').value||0.25);
+    const dirs=lastScan.filter(c=>c.dir!=='—');
+    say('scan: '+lastScan.length+' coins ranked · '+dirs.length+' with direction · need strength ≥'+minStr);
+    for(const c of lastScan.slice(0,5)){
+      let verdict='';
+      if(c.dir==='—')verdict='no clear direction';
+      else if(c.strength<minStr)verdict='strength '+c.strength.toFixed(2)+' below '+minStr;
+      else if(recentCoins.includes(c.sym))verdict='recently traded — temporarily skipped';
+      else if($('fundFilter')?.checked && Math.abs((c.fr||0)*100)<+($('botMinFund')?.value||3))verdict='funding '+((c.fr||0)*100).toFixed(2)+'% below filter';
+      else verdict='✓ WOULD TRADE '+c.dir+' (strength '+c.strength.toFixed(2)+')';
+      say('  '+c.sym+': '+verdict);
+    }
+    if(!lastScan.length)say('  scan returned nothing — possible API issue');
+  }catch(e){say('❌ scan failed: '+e.message);}
+  finish();
+  function finish(){
+    log(out.join('\n'));
+    const rd=$('rsDetail');if(rd)rd.innerHTML=out.map(s=>s.replace(/</g,'&lt;')).join('<br>');
+  }
+}
+window.whyNoTrades=whyNoTrades;
+
 let robotLoopTimer=null;
 function startRobotLoop(){
   if(robotLoopTimer)return;
@@ -1554,8 +1605,13 @@ async function robotTick(){
 
     // 3. verify no open position anywhere (true one-at-a-time)
     const pj=await proxy('GET','/v2/positions/margined');
-    const anyOpen=(pj.result||[]).some(p=>+p.size!==0);
-    if(anyOpen){log('🤖 a position is already open — waiting for it to close');botBusy=false;return;}
+    const openPos=(pj.result||[]).find(p=>+p.size!==0);
+    if(openPos){
+      const nm=openPos.product_symbol||('id '+openPos.product_id);
+      log('🤖 blocked by open position: '+nm+' (size '+openPos.size+') — close it on Delta to let the robot trade');
+      const rd=$('rsDetail'); if(rd)rd.innerHTML='⛔ <b>Blocked by open position: '+nm+'</b> (size '+openPos.size+'). Robot trades one at a time — close it on Delta to unblock.';
+      botBusy=false;return;
+    }
 
     // 3b. TREND FILTER — only trade WITH the multi-minute trend (if enabled)
     if($('trendFilter')?.checked){
