@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v47</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v48</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -288,39 +288,38 @@ if(sessionStorage.getItem('dx_auth')==='1'){
       <div class="card">
         <div class="card-h"><span class="l"><span class="mk"></span>Auto-Pilot Settings</span></div>
         <div class="card-b">
-          <div class="fld"><label>Position sizing</label>
-            <select id="sizeMode"><option value="pct">% of balance (auto lots)</option><option value="fixed">Fixed contracts</option></select></div>
           <div class="row2">
             <div class="fld"><label id="sizeLbl">Balance % per trade</label><input id="botPct" type="number" step="1" value="10"></div>
-            <div class="fld"><label>Min strength</label><input id="botScore" type="number" step="0.05" value="0.30"></div>
-          </div>
-          <div class="row2">
-            <div class="fld"><label>Cooldown (min)</label><input id="botCooldown" type="number" step="1" value="3"></div>
-            <div class="fld"><label>Trail step %</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
-          </div>
-          <div class="row2">
             <div class="fld"><label>Robot stop-loss %</label><input id="botSL" type="number" step="0.1" value="0.5"></div>
-            <div class="fld"><label>Robot take-profit %</label><input id="botTP" type="number" step="0.1" value="1.0"></div>
           </div>
-          <div class="fld"><label>Max trades per day (fee protection)</label><input id="botMaxTrades" type="number" step="1" value="10"></div>
-          <div style="font-size:10px;color:var(--muted);margin-bottom:8px">These are the robot's own SL/TP — separate from the manual trade panel.</div>
-          <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0 8px;padding:8px;background:var(--green-bg);border-radius:6px;cursor:pointer">
-            <input type="checkbox" id="trendFilter" checked style="width:auto">
-            <span><b>Trend filter</b> — only trade WITH the multi-minute trend (recommended)</span>
-          </label>
-          <div style="display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0 8px;padding:8px;background:var(--green-bg);border-radius:6px">
-            <input type="checkbox" id="fundFilter" style="width:auto">
-            <span style="flex:1"><b>Funding edge filter</b> — trade only coins with funding ≥</span>
-            <input id="botMinFund" type="number" step="0.5" value="3" style="width:60px;padding:4px 6px">
-            <span>%</span>
-          </div>
-          <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0 8px;padding:8px;background:var(--green-bg);border-radius:6px;cursor:pointer">
-            <input type="checkbox" id="obFilter" style="width:auto">
-            <span><b>Order-book agreement</b> — book must lean the trade's way (80% win combo in your data)</span>
-          </label>
-          <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Your journal data: high-funding coins were the only profitable group (70% wins, +1.58% net). Low-funding coins like BTC lost.</div>
+          <div class="fld"><label>Robot take-profit %</label><input id="botTP" type="number" step="0.1" value="1.0"></div>
+          <div id="sizeCalc" class="num" style="font-size:10px;color:var(--muted);margin-bottom:8px"></div>
+
+          <details style="margin-top:6px">
+            <summary style="cursor:pointer;font-size:11px;color:var(--muted);font-weight:600">Advanced (defaults are fine — no need to touch)</summary>
+            <div style="padding-top:10px">
+              <div class="fld"><label>Position sizing</label>
+                <select id="sizeMode"><option value="pct">% of balance (auto lots)</option><option value="fixed">Fixed contracts</option></select></div>
+              <div class="row2">
+                <div class="fld"><label>Min strength</label><input id="botScore" type="number" step="0.05" value="0.25"></div>
+                <div class="fld"><label>Cooldown (min)</label><input id="botCooldown" type="number" step="1" value="2"></div>
+              </div>
+              <div class="row2">
+                <div class="fld"><label>Trail step %</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
+                <div class="fld"><label>Max trades/day</label><input id="botMaxTrades" type="number" step="1" value="15"></div>
+              </div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0 8px;cursor:pointer">
+                <input type="checkbox" id="trendFilter" style="width:auto"> Trend filter (only trade with the 30-min trend)</label>
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0 8px">
+                <input type="checkbox" id="fundFilter" style="width:auto">
+                <span style="flex:1">Funding filter ≥</span>
+                <input id="botMinFund" type="number" step="0.5" value="3" style="width:60px;padding:4px 6px"><span>%</span>
+              </div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0 8px;cursor:pointer">
+                <input type="checkbox" id="obFilter" style="width:auto"> Order-book agreement check</label>
+            </div>
+          </details>
           <input id="botSize" type="hidden" value="1">
-          <div id="sizeCalc" class="num" style="font-size:10px;color:var(--muted)"></div>
         </div>
       </div>
 
@@ -377,7 +376,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
         <div class="card-h"><span class="l"><span class="mk"></span>Risk Guard</span></div>
         <div class="card-b">
           <div class="row2">
-            <div class="fld"><label>Daily loss limit</label><input id="dailyLimit" type="number" step="any" placeholder="2000"></div>
+            <div class="fld"><label>Daily loss limit</label><input id="dailyLimit" type="number" step="any" value="3" placeholder="3"></div>
             <div class="fld"><label>Live PnL</label><input id="todayPnl" type="number" step="any" value="0" readonly style="background:#eef1f5"></div>
           </div>
           <div id="guardMsg" style="font-size:11px;color:var(--muted)">Blocks new entries past the loss limit. Open positions untouched.</div>
@@ -1777,7 +1776,15 @@ $('autoExec')?.addEventListener('change',()=>{
 if(localStorage.getItem('dx_engineOn')==='1'){const s=$('sigOn');if(s){s.checked=true;}}
 // restore + persist trend filter
 if($('trendFilter')){
-  if(localStorage.getItem('dx_trendFilter')==='0')$('trendFilter').checked=false;
+  // v48 simplification: one-time reset to trade-friendly defaults (user asked to unblock trading)
+  if(!localStorage.getItem('dx_simple48')){
+    localStorage.setItem('dx_simple48','1');
+    localStorage.setItem('dx_trendFilter','0');
+    localStorage.setItem('dx_set_botScore','0.25');
+    localStorage.setItem('dx_set_botCooldown','2');
+    localStorage.setItem('dx_set_botMaxTrades','15');
+  }
+  if(localStorage.getItem('dx_trendFilter')==='1')$('trendFilter').checked=true;
   $('trendFilter').addEventListener('change',()=>localStorage.setItem('dx_trendFilter',$('trendFilter').checked?'1':'0'));
 }
 if($('fundFilter')){
