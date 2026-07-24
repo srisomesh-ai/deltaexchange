@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v49</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v50</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -255,7 +255,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
           <div id="robotStatus" class="robot-status">
             <div class="st" id="rsStateWrap"><span id="rsLight" style="width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block"></span><span id="rsState">Robot Off</span></div>
             <div class="dt" id="rsDetail">Turn on the engine, then auto-pilot to arm the robot.</div>
-            <button onclick="whyNoTrades()" style="margin-top:9px;font-size:11px;padding:6px 12px">🔍 Why no trades?</button>
+            
           </div>
           <div class="gauge">
             <div class="dir-big" id="sigDir" style="color:var(--muted)">NEUTRAL</div>
@@ -1483,13 +1483,12 @@ async function verifyProtection(prod, side, size, sl, tp){
     }
   }catch(e){log('   ⚠ protection check error: '+e.message+' — verify SL manually');}
 }
-// cancel any leftover stop orders after a position closes (prevents orphaned stops triggering later)
+// cancel ALL leftover orders on a product after its position closes (stop + take-profit)
 async function cleanupStops(prodId){
   try{
     const oj=await proxy('GET','/v2/orders',{query:'?product_ids='+prodId+'&states=open,pending'});
     for(const o of (oj.result||[])){
-      const isStop=(o.stop_order_type||'').toLowerCase().includes('stop')||o.stop_price;
-      if(isStop && o.id){try{await proxy('DELETE','/v2/orders',{body:{id:o.id,product_id:prodId}});log('   🧹 cleaned up leftover stop order '+o.id);}catch(e){}}
+      if(o.id){try{await proxy('DELETE','/v2/orders',{body:{id:o.id,product_id:prodId}});log('   🧹 cleaned up leftover order '+o.id);}catch(e){}}
     }
   }catch(e){}
 }
@@ -1657,38 +1656,72 @@ async function robotTick(){
     const mark=pick.mark;
     const size=computeContracts(prod, mark);
     const slP=+$('botSL').value||0.5, tpP=+$('botTP').value||1.0;
-    const isBuy=botSide==='buy';
     const tick=prod.tick_size?+prod.tick_size:0.5;
     const rnd=px=>(Math.round(px/tick)*tick).toFixed(String(tick).includes('.')?String(tick).split('.')[1].length:0);
-    const sl=rnd(isBuy?mark*(1-slP/100):mark*(1+slP/100));
-    const tp=rnd(isBuy?mark*(1+tpP/100):mark*(1-tpP/100));
-    const body={
-      product_id:prod.id, product_symbol:prod.symbol, size, side:botSide, order_type:'market_order',
-      bracket_stop_loss_price:String(sl), bracket_stop_loss_limit_price:String(sl),
-      bracket_take_profit_price:String(tp), bracket_take_profit_limit_price:String(tp),
-      bracket_stop_trigger_method:'mark_price'
-    };
+
     const lev=parseInt($('lev').value)||10;
     await proxy('POST','/v2/products/'+prod.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
-    const jr=await proxy('POST','/v2/orders',{body});
+
+    // ── STEP 1: plain market entry (no bracket — brackets fail silently) ──
+    const jr=await proxy('POST','/v2/orders',{body:{
+      product_id:prod.id, product_symbol:prod.symbol, size, side:botSide, order_type:'market_order'
+    }});
     if(jr.success===false){log('🤖✗ '+pick.sym+' rejected: '+JSON.stringify(jr.error));botBusy=false;return;}
-    else{
-      robotOpenTrade={side:botSide,entry:mark,size,sym:pick.sym,
-        prodId:prod.id, tick, slP, tpP,
-        curSL:+sl, curTP:+tp, steps:0, lastStepPrice:mark,
-        stepPct:(+$('trailStep')?.value||slP)};   // step size % (defaults to SL%)
-      saveRobotTrade();
-      lastTradeTime=Date.now();
-      // count today's trade for the daily cap
-      try{const td=new Date().toDateString();let c=JSON.parse(localStorage.getItem('dx_tradeCount')||'{}');if(c.d!==td)c={d:td,n:0};c.n++;localStorage.setItem('dx_tradeCount',JSON.stringify(c));}catch(e){}
-      recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);  // avoid last 3 coins
-      log(`🤖✓ ${botSide.toUpperCase()} ${size} ${pick.sym} @${fmt(mark,priceDp())}  SL ${sl} TP ${tp}  (strength ${(pick.strength*100).toFixed(0)})`);
-      if($('trailOn')?.checked)log('   ⤴ trailing armed — step '+((+$('trailStep')?.value||slP))+'%');
-      updateRobotStatus();
-      // ── CRITICAL: verify the bracket actually attached; if not, protect the position ──
-      setTimeout(()=>verifyProtection(prod, botSide, size, sl, tp), 4000);
-      loadPositions();
+
+    // ── STEP 2: read the ACTUAL position back from the exchange (source of truth) ──
+    let pos=null;
+    for(let i=0;i<6 && !pos;i++){
+      await new Promise(r=>setTimeout(r,1200));
+      try{
+        const pj2=await proxy('GET','/v2/positions/margined');
+        pos=(pj2.result||[]).find(p=>(p.product_id===prod.id||p.product_symbol===prod.symbol)&&+p.size!==0)||null;
+      }catch(e){}
     }
+    if(!pos){log('🤖⚠ entry sent but no position visible after 7s — check Delta manually');botBusy=false;return;}
+
+    // Direction from REALITY: we know what we sent; the exchange confirms a position exists.
+    // Entry price from the exchange, not our estimate.
+    const realEntry=+pos.entry_price||mark;
+    const realSize=Math.abs(+pos.size);
+    const isBuy=botSide==='buy';
+    const sl=rnd(isBuy?realEntry*(1-slP/100):realEntry*(1+slP/100));
+    const tp=rnd(isBuy?realEntry*(1+tpP/100):realEntry*(1-tpP/100));
+    const closeSide=isBuy?'sell':'buy';
+
+    // ── STEP 3: protect it — reduce-only stop + take-profit from actual position ──
+    let slOk=false, slErr='';
+    for(let attempt=0; attempt<3 && !slOk; attempt++){
+      const r=await proxy('POST','/v2/orders',{body:{
+        product_id:prod.id, size:realSize, side:closeSide,
+        order_type:'market_order', stop_order_type:'stop_loss_order',
+        stop_price:String(sl), stop_trigger_method:'mark_price', reduce_only:true
+      }});
+      if(r.success!==false){slOk=true;}
+      else{slErr=JSON.stringify(r.error);await new Promise(x=>setTimeout(x,1000));}
+    }
+    if(!slOk){
+      // NEVER hold an unprotected position: close it immediately
+      log('🤖🛑 could not place stop-loss ('+slErr+') — CLOSING position immediately for safety');
+      await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:realSize,side:closeSide,order_type:'market_order',reduce_only:true}}).catch(()=>{});
+      botBusy=false;return;
+    }
+    // take-profit (best effort — stop is the critical one)
+    await proxy('POST','/v2/orders',{body:{
+      product_id:prod.id, size:realSize, side:closeSide,
+      order_type:'limit_order', limit_price:String(tp), reduce_only:true
+    }}).catch(()=>{});
+
+    robotOpenTrade={side:botSide,entry:realEntry,size:realSize,sym:pick.sym,
+      prodId:prod.id, tick, slP, tpP,
+      curSL:+sl, curTP:+tp, steps:0, lastStepPrice:realEntry,
+      stepPct:(+$('trailStep')?.value||slP)};
+    saveRobotTrade();
+    lastTradeTime=Date.now();
+    try{const td=new Date().toDateString();let c=JSON.parse(localStorage.getItem('dx_tradeCount')||'{}');if(c.d!==td)c={d:td,n:0};c.n++;localStorage.setItem('dx_tradeCount',JSON.stringify(c));}catch(e){}
+    recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);
+    log(`🤖✓ ${botSide.toUpperCase()} ${realSize} ${pick.sym} @${fmt(realEntry,priceDp())} · 🛡 SL ${sl} confirmed · TP ${tp}  (strength ${(pick.strength*100).toFixed(0)})`);
+    updateRobotStatus();
+    loadPositions();
   }catch(e){log('🤖 loop error: '+e.message);}
   botBusy=false;
 }
