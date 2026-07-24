@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v52</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v53</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -178,7 +178,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
     <div class="card-h"><span class="l"><span class="mk"></span>Proxy Connection</span></div>
     <div class="card-b">
       <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:11px">
-        <button id="envLive" onclick="setEnv('live')" class="pill-env" style="padding:7px 16px">LIVE</button>
+        <button id="envLive" disabled class="pill-env" style="padding:7px 16px;opacity:.4;cursor:not-allowed" title="Disabled during testing">LIVE 🔒</button>
         <button id="envTest" onclick="setEnv('testnet')" class="pill-env" style="padding:7px 16px">TESTNET</button>
         <span id="envLabel" class="num" style="font-size:12px;color:var(--amber);font-weight:600"></span>
       </div>
@@ -462,7 +462,16 @@ function renderCore(){ /* no core orb in this theme — status shown via updateR
 const PUB = 'https://api.india.delta.exchange';   // public market data (no auth)
 let PROXY = localStorage.getItem('dx_proxy') || '';
 let PTOKEN = localStorage.getItem('dx_token') || '';
-let ENV = localStorage.getItem('dx_env') || 'live';   // 'live' or 'testnet'
+// ── TESTNET-ONLY MODE: LIVE is fully disabled for this testing phase ──
+let ENV = 'testnet';
+localStorage.setItem('dx_env','testnet');
+// ── FRESH START (one-time): wipe robot state so the test begins from zero ──
+if(!localStorage.getItem('dx_fresh53')){
+  localStorage.setItem('dx_fresh53','1');
+  ['dx_robotTrade','dx_tradeCount','dx_journal','dx_log'].forEach(k=>localStorage.removeItem(k));
+  localStorage.setItem('dx_master','0');
+  localStorage.setItem('dx_engineOn','0');
+}
 let curTab='pos';
 let availBalance=0;   // available settle-currency balance for sizing
 let products = [];      // perpetual futures
@@ -641,6 +650,10 @@ function toggleCfg(){
   if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.focus();}
 }
 function setEnv(e){
+  if(e!=='testnet'){
+    log('🔒 LIVE is disabled during the testing phase — running on DEMO only.');
+    return;
+  }
   ENV=e; localStorage.setItem('dx_env',e);
   refreshEnvUI();
   if(typeof updateRobotStatus==='function')updateRobotStatus();
