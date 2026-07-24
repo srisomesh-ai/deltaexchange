@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v50</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v51</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -474,10 +474,11 @@ let ticker = {};
 /* ================= UTIL ================= */
 const $=id=>document.getElementById(id);
 // Fetch public market data. If proxy is set, route through it (avoids mobile CORS).
-async function pubGet(path,query=''){
+async function pubGet(path,query='',envOverride){
+  const useEnv=envOverride||ENV;
   if(PROXY){
     const r=await fetch(PROXY,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({env:ENV,public:true,method:'GET',path,query})});
+      body:JSON.stringify({env:useEnv,public:true,method:'GET',path,query})});
     return r.json();
   }
   const r=await fetch(PUB+path+query);
@@ -644,7 +645,7 @@ function setEnv(e){
   refreshEnvUI();
   if(typeof updateRobotStatus==='function')updateRobotStatus();
   loadProducts(); loadBalance();
-  log('switched to '+e.toUpperCase());
+  log('switched to '+e.toUpperCase()+(e==='testnet'?' — 📡 signals from LIVE market data, orders on DEMO':''));
 }
 function refreshEnvUI(){
   const live=ENV==='live';
@@ -924,7 +925,9 @@ async function runScan(){
   if(scanning)return; scanning=true;
   const btn=$('scanBtn'); if(btn){btn.textContent='Scanning…';btn.disabled=true;}
   try{
-    const j=await pubGet('/v2/tickers');
+    // Always scan the LIVE market's real data — testnet tickers are empty/stale.
+    // (Signals from reality; execution happens on whichever env is selected.)
+    const j=await pubGet('/v2/tickers','','live');
     // keep only perpetuals with a real mark price
     let all=(j.result||[]).filter(t=>{
       const sym=t.symbol||'';
@@ -1042,7 +1045,7 @@ async function getTrend(sym){
   try{
     // last ~30 min of 1-minute candles
     const end=Math.floor(Date.now()/1000), start=end-1800;
-    const j=await pubGet('/v2/history/candles','?resolution=1m&symbol='+sym+'&start='+start+'&end='+end);
+    const j=await pubGet('/v2/history/candles','?resolution=1m&symbol='+sym+'&start='+start+'&end='+end,'live');
     const cd=(j.result||[]).slice().sort((a,b)=>a.time-b.time);
     if(cd.length<10){const r={t:Date.now(),trend:0,dir:'flat'};trendCache[sym]=r;return r;}
     const closes=cd.map(x=>+x.close);
@@ -1588,13 +1591,16 @@ async function robotTick(){
     const minFund=+($('botMinFund')?.value||3);
     const fundOn=$('fundFilter')?.checked;
     const fundOk = fundOn ? notRecent.filter(c=>Math.abs((c.fr||0)*100)>=minFund) : notRecent;
-    const pick=fundOk[0];
+    // pick the strongest candidate that is actually tradeable on the CURRENT env
+    // (scan uses live data; testnet may not list every coin)
+    const pick=fundOk.find(c=>products.some(p=>p.symbol===c.sym));
     if(!pick){
       const best=directional[0];
       let why='';
       if(!directional.length) why='no coin has a clear direction right now';
       else if(!strongEnough.length) why=`${directional.length} coins have direction but none reach strength ${minStr} (best: ${best.sym} ${best.strength.toFixed(2)})`;
       else if(!notRecent.length) why=`${strongEnough.length} qualify but all recently traded (${recentCoins.join(', ')})`;
+      else if(fundOk.length) why=`${fundOk.length} qualify but none is listed on ${ENV.toUpperCase()} — candidates: ${fundOk.slice(0,3).map(c=>c.sym).join(', ')}`;
       else why=`${notRecent.length} qualify but none has funding ≥${minFund}% (edge zone). Best funding: ${(Math.max(...notRecent.map(c=>Math.abs((c.fr||0)*100)))).toFixed(2)}%`;
       log('🤖 waiting — '+why);
       const rd=$('rsDetail'); if(rd && $('autoExec')?.checked)rd.innerHTML='<b>Scanning…</b> '+why;
@@ -1629,7 +1635,7 @@ async function robotTick(){
     // book agreed with the direction won 80% (+2.70%); where it disagreed they won 40% (-1.12%).
     if($('obFilter')?.checked!==false){
       try{
-        const bj=await pubGet('/v2/l2orderbook/'+pick.sym);
+        const bj=await pubGet('/v2/l2orderbook/'+pick.sym,'','live');
         const res=bj.result||{};
         const sum=(arr)=> (arr||[]).slice(0,10).reduce((a,l)=>a+(+l.size||0),0);
         const bidD=sum(res.buy), askD=sum(res.sell);
