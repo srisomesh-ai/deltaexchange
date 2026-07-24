@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v53</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v54</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -1571,7 +1571,23 @@ function stopRobotLoop(){ clearInterval(robotLoopTimer); robotLoopTimer=null; }
 
 async function robotTick(){
   if(!$('autoExec')?.checked || !$('sigOn')?.checked) return;
-  if(botBusy || robotOpenTrade) return;   // one position at a time
+  if(botBusy) return;
+  // TESTNET AUTO-UNBLOCK: an adopted (reconnected) leftover demo position can block forever
+  // if it has no SL/TP. On demo, just close it and move on — it's paper money.
+  if(robotOpenTrade && ENV==='testnet' && robotOpenTrade.reconnected){
+    botBusy=true;
+    try{
+      const prodId=robotOpenTrade.prodId;
+      const closeSide=robotOpenTrade.side==='buy'?'sell':'buy';
+      log('🧹 demo cleanup: closing leftover position '+robotOpenTrade.sym+' that was blocking the robot');
+      await proxy('POST','/v2/orders',{body:{product_id:prodId,size:robotOpenTrade.size,side:closeSide,order_type:'market_order',reduce_only:true}}).catch(()=>{});
+      if(prodId)await cleanupStops(prodId);
+      robotOpenTrade=null;saveRobotTrade();updateRobotStatus();
+    }catch(e){log('   cleanup error: '+e.message);}
+    botBusy=false;
+    return; // next tick trades fresh
+  }
+  if(robotOpenTrade) return;   // one position at a time (robot's own trade)
   if(typeof guardBlocks==='function' && guardBlocks()){
     log('🛑 daily loss limit hit — robot paused, no new entries');
     return;
@@ -1628,6 +1644,14 @@ async function robotTick(){
     const openPos=(pj.result||[]).find(p=>+p.size!==0);
     if(openPos){
       const nm=openPos.product_symbol||('id '+openPos.product_id);
+      if(ENV==='testnet'){
+        log('🧹 demo cleanup: closing blocking position '+nm+' (size '+openPos.size+')');
+        const cs=+openPos.size>0?'sell':'buy';  // best-effort; wrong side gets rejected harmlessly (reduce-only)
+        await proxy('POST','/v2/orders',{body:{product_id:openPos.product_id,size:Math.abs(+openPos.size),side:cs,order_type:'market_order',reduce_only:true}}).catch(()=>{});
+        await proxy('POST','/v2/orders',{body:{product_id:openPos.product_id,size:Math.abs(+openPos.size),side:(cs==='sell'?'buy':'sell'),order_type:'market_order',reduce_only:true}}).catch(()=>{});
+        if(openPos.product_id)await cleanupStops(openPos.product_id);
+        botBusy=false;return; // trade fresh next tick
+      }
       log('🤖 blocked by open position: '+nm+' (size '+openPos.size+') — close it on Delta to let the robot trade');
       const rd=$('rsDetail'); if(rd)rd.innerHTML='⛔ <b>Blocked by open position: '+nm+'</b> (size '+openPos.size+'). Robot trades one at a time — close it on Delta to unblock.';
       botBusy=false;return;
@@ -1675,7 +1699,11 @@ async function robotTick(){
 
     const botSide = pick.dir==='LONG'?'buy':'sell';
     const mark=pick.mark;
-    const size=computeContracts(prod, mark);
+    let size=computeContracts(prod, mark);
+    if(!size || size<1){
+      if(ENV==='testnet'){size=1;log('   size calc gave 0 (balance not loaded?) — demo fallback: 1 contract');}
+      else{log('🤖 size calc gave 0 — balance too small or not loaded. Increase balance % or check Connect.');botBusy=false;return;}
+    }
     const slP=+$('botSL').value||0.5, tpP=+$('botTP').value||1.0;
     const tick=prod.tick_size?+prod.tick_size:0.5;
     const rnd=px=>(Math.round(px/tick)*tick).toFixed(String(tick).includes('.')?String(tick).split('.')[1].length:0);
