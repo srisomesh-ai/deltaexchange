@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v51</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v52</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -701,7 +701,9 @@ function gatherSettings(){
   const s={};
   for(let i=0;i<localStorage.length;i++){
     const k=localStorage.key(i);
-    if(k.startsWith('dx_set_')||['dx_engineOn','dx_env','dx_log','dx_journal'].includes(k))s[k]=localStorage.getItem(k);
+    // NOTE: dx_env is deliberately NOT synced — live/testnet is a local safety switch,
+    // syncing it caused refreshes to silently flip users back to LIVE.
+    if(k.startsWith('dx_set_')||['dx_engineOn','dx_log','dx_journal'].includes(k))s[k]=localStorage.getItem(k);
   }
   return s;
 }
@@ -722,7 +724,7 @@ async function cloudLoad(){
       body:JSON.stringify({sync:'load'})});
     const j=await r.json();
     if(j.success&&j.data){
-      Object.entries(j.data).forEach(([k,v])=>{if(v!=null)localStorage.setItem(k,v);});
+      Object.entries(j.data).forEach(([k,v])=>{if(v!=null && k!=='dx_env')localStorage.setItem(k,v);});
       // rebuild in-memory journal from synced data
       try{const sj=localStorage.getItem('dx_journal');if(sj){journal=JSON.parse(sj);if($('jCount'))$('jCount').textContent=journal.length;}}catch(e){}
       log('☁ settings loaded from server');
