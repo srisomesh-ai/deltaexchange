@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v56</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v57</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -1594,7 +1594,13 @@ async function simpleTick(){
       const c=await proxy('GET','/v2/positions/margined').catch(()=>({}));
       pos=(c.result||[]).find(p=>p.product_id===prod.id&&+p.size!==0)||null;
     }
-    if(!pos){log('x no position visible after entry - check demo account');botBusy=false;return;}
+    if(!pos){
+      // entry may have filled even if not visible yet - try once more, then force-close for safety
+      await new Promise(r=>setTimeout(r,3000));
+      const c2=await proxy('GET','/v2/positions/margined').catch(()=>({}));
+      pos=(c2.result||[]).find(p=>p.product_id===prod.id&&+p.size!==0)||null;
+      if(!pos){log('x no position visible after entry - will be cleaned next tick if it exists');botBusy=false;return;}
+    }
     const entry=+pos.entry_price;
     const tick=+prod.tick_size||0.0001;
     const dp=String(tick).includes('.')?String(tick).split('.')[1].length:0;
@@ -1610,8 +1616,28 @@ async function simpleTick(){
       await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:cs,order_type:'market_order',reduce_only:true}}).catch(()=>{});
       botBusy=false;return;
     }
-    await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:cs,order_type:'limit_order',limit_price:String(tp),reduce_only:true}}).catch(()=>{});
-    log('protected: SL '+sl+' TP '+tp+' (entry '+rnd(entry)+')');
+    const tpr=await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:cs,order_type:'limit_order',limit_price:String(tp),reduce_only:true}}).catch(e=>({success:false,error:e.message}));
+    if(tpr.success===false)log('! TP note: '+JSON.stringify(tpr.error));
+    // VERIFY on the exchange - never assume protection landed
+    await new Promise(r=>setTimeout(r,1500));
+    let vj=await proxy('GET','/v2/orders',{query:'?product_ids='+prod.id+'&states=open,pending'}).catch(()=>({}));
+    let os=vj.result||[];
+    let stopN=os.filter(o=>o.stop_price||String(o.stop_order_type||'').toLowerCase().includes('stop')).length;
+    let tpN=os.filter(o=>!o.stop_price&&o.order_type==='limit_order').length;
+    if(!stopN){
+      log('! stop not visible on exchange - retrying SL once');
+      const sr2=await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:cs,order_type:'market_order',stop_order_type:'stop_loss_order',stop_price:String(sl),stop_trigger_method:'mark_price',reduce_only:true}}).catch(e=>({success:false,error:e.message}));
+      await new Promise(r=>setTimeout(r,1500));
+      vj=await proxy('GET','/v2/orders',{query:'?product_ids='+prod.id+'&states=open,pending'}).catch(()=>({}));
+      os=vj.result||[];
+      stopN=os.filter(o=>o.stop_price||String(o.stop_order_type||'').toLowerCase().includes('stop')).length;
+      if(!stopN){
+        log('x stop STILL not on exchange ('+JSON.stringify(sr2.error||'no error reported')+') -> closing position for safety');
+        await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:cs,order_type:'market_order',reduce_only:true}}).catch(()=>{});
+        botBusy=false;return;
+      }
+    }
+    log('VERIFIED on exchange: '+stopN+' stop + '+tpN+' take-profit active | SL '+sl+' TP '+tp+' (entry '+rnd(entry)+')');
     robotOpenTrade={side:dir,entry,size:Math.abs(+pos.size),sym:pick.sym,prodId:prod.id,tick,slP,tpP,curSL:+sl,curTP:+tp,steps:0,stepPct:(+$('trailStep')?.value||slP)};
     saveRobotTrade();recentCoins=[pick.sym];lastTradeTime=Date.now();
     updateRobotStatus();loadPositions();
