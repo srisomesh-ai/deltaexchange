@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v58</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v59</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -1575,14 +1575,22 @@ async function simpleTick(){
     if(!tj.result){log('x scan failed - no ticker data');botBusy=false;return;}
     const movers=(tj.result||[])
       .filter(t=>(t.contract_type==='perpetual_futures'||String(t.symbol||'').endsWith('USD'))&&+t.mark_price>0&&+t.open>0)
-      .map(t=>({sym:t.symbol,mark:+t.mark_price,chg:((+t.mark_price-+t.open)/+t.open*100)}))
+      .map(t=>{
+        const chg=((+t.mark_price-+t.open)/+t.open*100);
+        const fundPct=(+t.funding_rate||0)*100;
+        const score=Math.abs(chg)+Math.min(Math.abs(fundPct),10)*0.8;
+        return {sym:t.symbol,mark:+t.mark_price,chg,fundPct,score};
+      })
       .filter(m=>isFinite(m.chg))
-      .sort((a,b)=>Math.abs(b.chg)-Math.abs(a.chg));
+      .sort((a,b)=>b.score-a.score);
     const pick=movers.find(m=>Math.abs(m.chg)>=1 && m.sym!==recentCoins[0] && products.some(p=>p.symbol===m.sym));
     if(!pick){log('... no mover >=1% tradeable here (top: '+(movers[0]?movers[0].sym+' '+movers[0].chg.toFixed(1)+'%':'none')+')');botBusy=false;return;}
-    const dir=pick.chg>0?'buy':'sell';
+    let dir, why;
+    if(pick.fundPct>=2){dir='sell';why='funding +'+pick.fundPct.toFixed(1)+'% = crowded longs -> fade SHORT';}
+    else if(pick.fundPct<=-2){dir='buy';why='funding '+pick.fundPct.toFixed(1)+'% = crowded shorts -> fade LONG';}
+    else{dir=pick.chg>0?'buy':'sell';why='momentum follow ('+pick.chg.toFixed(1)+'%, funding mild '+pick.fundPct.toFixed(2)+'%)';}
     const prod=products.find(p=>p.symbol===pick.sym);
-    log('pick: '+pick.sym+' '+pick.chg.toFixed(1)+'% -> '+dir.toUpperCase());
+    log('pick: '+pick.sym+' '+pick.chg.toFixed(1)+'% -> '+dir.toUpperCase()+' | '+why);
     const botLev=parseInt($('botLev')?.value)||2;
     const lr=await proxy('POST','/v2/products/'+prod.id+'/orders/leverage',{body:{leverage:String(botLev)}}).catch(e=>({success:false,error:e.message}));
     if(lr.success===false)log('! leverage set note: '+JSON.stringify(lr.error)+' (wanted '+botLev+'x)');
