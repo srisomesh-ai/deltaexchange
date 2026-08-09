@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v60</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v61</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -178,7 +178,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
     <div class="card-h"><span class="l"><span class="mk"></span>Proxy Connection</span></div>
     <div class="card-b">
       <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:11px">
-        <button id="envLive" disabled class="pill-env" style="padding:7px 16px;opacity:.4;cursor:not-allowed" title="Disabled during testing">LIVE 🔒</button>
+        <button id="envLive" onclick="setEnv('live')" class="pill-env" style="padding:7px 16px">LIVE</button>
         <button id="envTest" onclick="setEnv('testnet')" class="pill-env" style="padding:7px 16px">TESTNET</button>
         <span id="envLabel" class="num" style="font-size:12px;color:var(--amber);font-weight:600"></span>
       </div>
@@ -444,9 +444,7 @@ function renderCore(){ /* no core orb in this theme — status shown via updateR
 const PUB = 'https://api.india.delta.exchange';   // public market data (no auth)
 let PROXY = localStorage.getItem('dx_proxy') || '';
 let PTOKEN = localStorage.getItem('dx_token') || '';
-// ── TESTNET-ONLY MODE: LIVE is fully disabled for this testing phase ──
-let ENV = 'testnet';
-localStorage.setItem('dx_env','testnet');
+let ENV = localStorage.getItem('dx_env') || 'testnet';   // defaults to demo; LIVE selectable
 // ── FRESH START (one-time): wipe robot state so the test begins from zero ──
 if(!localStorage.getItem('dx_fresh55')){
   localStorage.setItem('dx_fresh55','1');
@@ -636,10 +634,6 @@ function toggleCfg(){
   if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.focus();}
 }
 function setEnv(e){
-  if(e!=='testnet'){
-    log('🔒 LIVE is disabled during the testing phase — running on DEMO only.');
-    return;
-  }
   ENV=e; localStorage.setItem('dx_env',e);
   refreshEnvUI();
   if(typeof updateRobotStatus==='function')updateRobotStatus();
@@ -1558,7 +1552,12 @@ async function simpleTick(){
     const op=(pj.result||[]).find(p=>+p.size!==0);
     if(op){
       if(robotOpenTrade && (op.product_id===robotOpenTrade.prodId)){botBusy=false;return;}
-      log('cleanup: closing leftover '+(op.product_symbol||op.product_id)+' size '+op.size);
+      if(ENV!=='testnet'){
+        log('blocked: open position '+(op.product_symbol||op.product_id)+' size '+op.size+' on LIVE - close it yourself on Delta to let the robot trade');
+        const rd=$('rsDetail'); if(rd)rd.innerHTML='&#9940; <b>Open position '+(op.product_symbol||op.product_id)+'</b> is blocking. On LIVE the robot never closes your positions - close it on Delta to unblock.';
+        botBusy=false;return;
+      }
+      log('cleanup (demo): closing leftover '+(op.product_symbol||op.product_id)+' size '+op.size);
       const s1=+op.size>0?'sell':'buy';
       await proxy('POST','/v2/orders',{body:{product_id:op.product_id,size:Math.abs(+op.size),side:s1,order_type:'market_order',reduce_only:true}}).catch(()=>{});
       await proxy('POST','/v2/orders',{body:{product_id:op.product_id,size:Math.abs(+op.size),side:s1==='sell'?'buy':'sell',order_type:'market_order',reduce_only:true}}).catch(()=>{});
