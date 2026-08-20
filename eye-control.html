@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EyePilot — Control the browser with your eyes</title>
+<style>
+:root{
+  --bg:#0b1020;
+  --panel:#141b33;
+  --panel2:#1b2547;
+  --ink:#eef2ff;
+  --dim:#8b95b8;
+  --accent:#39d6c0;
+  --accent2:#ffb454;
+  --danger:#ff6b81;
+  --ring:#39d6c0;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  background:var(--bg);color:var(--ink);
+  overflow-x:hidden;
+}
+/* ---------- gaze cursor ---------- */
+#gazeCursor{
+  position:fixed;left:0;top:0;width:56px;height:56px;
+  margin-left:-28px;margin-top:-28px;
+  pointer-events:none;z-index:9999;display:none;
+}
+#gazeCursor svg{width:56px;height:56px;overflow:visible}
+#gazeDot{fill:var(--ring);opacity:.9}
+#dwellArc{fill:none;stroke:var(--accent2);stroke-width:5;stroke-linecap:round;
+  transform:rotate(-90deg);transform-origin:center;}
+#gazeRing{fill:none;stroke:var(--ring);stroke-width:2;opacity:.5}
+
+/* ---------- layout ---------- */
+.screen{min-height:100vh;display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.screen.active{display:flex}
+h1{font-size:2.2rem;letter-spacing:.5px}
+h1 .eye{color:var(--accent)}
+p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;line-height:1.6}
+.btn{
+  background:var(--accent);color:#04211c;border:none;border-radius:14px;
+  padding:18px 36px;font-size:1.15rem;font-weight:700;cursor:pointer;
+  transition:transform .15s, box-shadow .15s;
+}
+.btn:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(57,214,192,.35)}
+.btn.secondary{background:var(--panel2);color:var(--ink)}
+.small{font-size:.85rem;color:var(--dim);margin-top:18px}
+
+/* ---------- calibration ---------- */
+#calibScreen{position:relative;justify-content:flex-start;padding-top:70px}
+.calib-dot{
+  position:fixed;width:46px;height:46px;border-radius:50%;
+  background:var(--danger);border:4px solid #fff3;
+  cursor:pointer;z-index:500;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:700;color:#fff;font-size:.8rem;
+  transition:background .2s, transform .1s;
+}
+.calib-dot:active{transform:scale(.9)}
+.calib-dot.done{background:var(--accent);pointer-events:none;opacity:.35}
+#calibInfo{background:var(--panel);border-radius:14px;padding:16px 24px;max-width:520px}
+
+/* ---------- main demo page ---------- */
+#mainScreen{display:none;min-height:160vh;padding:0}
+#mainScreen.active{display:block}
+.topbar{
+  position:sticky;top:0;z-index:300;
+  display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+  background:var(--panel);padding:14px 20px;border-bottom:1px solid #ffffff14;
+}
+.topbar .status{margin-left:auto;color:var(--dim);font-size:.85rem}
+.chip{background:var(--panel2);border:none;color:var(--ink);border-radius:10px;
+  padding:12px 18px;font-size:.95rem;cursor:pointer}
+.grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+  gap:22px;padding:34px 26px;max-width:1100px;margin:0 auto;
+}
+.tile{
+  background:var(--panel);border:1px solid #ffffff10;border-radius:18px;
+  padding:34px 22px;text-align:center;cursor:pointer;
+  font-size:1.15rem;font-weight:600;min-height:130px;
+  display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;
+  transition:background .15s, border-color .15s;
+}
+.tile:hover,.tile.gaze-hover{background:var(--panel2);border-color:var(--accent)}
+.tile span.icon{font-size:2rem}
+.tile small{color:var(--dim);font-weight:400}
+.tile.activated{background:#0f3d36;border-color:var(--accent)}
+.scroll-hint{
+  position:fixed;left:50%;transform:translateX(-50%);
+  background:#0008;color:var(--dim);padding:6px 16px;border-radius:99px;
+  font-size:.8rem;z-index:250;pointer-events:none;opacity:0;transition:opacity .3s;
+}
+.scroll-hint.show{opacity:1}
+#hintTop{top:8px}#hintBottom{bottom:8px}
+.section-title{max-width:1100px;margin:26px auto 0;padding:0 26px;color:var(--dim);text-transform:uppercase;letter-spacing:2px;font-size:.8rem}
+#log{
+  max-width:1100px;margin:0 auto 60px;padding:0 26px;color:var(--dim);
+  font-family:monospace;font-size:.85rem;line-height:1.8;
+}
+#toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
+  background:var(--accent);color:#04211c;font-weight:700;
+  padding:14px 28px;border-radius:12px;z-index:1000;transition:transform .25s;
+}
+#toast.show{transform:translateX(-50%) translateY(0)}
+#webgazerVideoContainer{z-index:200 !important}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important} }
+</style>
+</head>
+<body>
+
+<!-- gaze cursor with dwell progress ring -->
+<div id="gazeCursor">
+  <svg viewBox="0 0 56 56">
+    <circle id="gazeRing" cx="28" cy="28" r="22"/>
+    <circle id="dwellArc" cx="28" cy="28" r="22" stroke-dasharray="138.2" stroke-dashoffset="138.2"/>
+    <circle id="gazeDot" cx="28" cy="28" r="5"/>
+  </svg>
+</div>
+
+<!-- 1. START -->
+<div class="screen active" id="startScreen">
+  <h1><span class="eye">◉</span> EyePilot</h1>
+  <p class="lead">Control this page with your eyes only. Your webcam tracks where you look.
+  A cursor follows your gaze — stare at any button for 1.5 seconds and it clicks itself.
+  Look at the top or bottom edge of the screen to scroll.<br><br>
+  Everything runs inside your browser. No video is uploaded anywhere.</p>
+  <button class="btn" id="startBtn">Turn on eye tracking</button>
+  <p class="small">Works on laptop / desktop with a webcam. Use Chrome. Sit about arm's length from the screen, face well lit.</p>
+</div>
+
+<!-- 2. CALIBRATION -->
+<div class="screen" id="calibScreen">
+  <div id="calibInfo">
+    <h2 style="margin-bottom:8px">Calibration</h2>
+    <p style="color:var(--dim);line-height:1.6">
+      Click each red dot <b>5 times while looking directly at it</b>.
+      Dots turn green when done. This teaches the tracker where your eyes point.
+    </p>
+    <p id="calibProgress" style="margin-top:10px;color:var(--accent);font-weight:700">0 / 9 points done</p>
+  </div>
+</div>
+
+<!-- 3. MAIN DEMO -->
+<div id="mainScreen">
+  <div class="topbar">
+    <button class="chip gaze-target" id="pauseBtn">⏸ Pause tracking</button>
+    <button class="chip gaze-target" id="recalBtn">🎯 Recalibrate</button>
+    <button class="chip gaze-target" id="camBtn">📷 Hide camera</button>
+    <span class="status" id="statusTxt">Eye tracking active — dwell 1.5s to click</span>
+  </div>
+
+  <div id="hintTop" class="scroll-hint">▲ scrolling up</div>
+  <div id="hintBottom" class="scroll-hint">▼ scrolling down</div>
+
+  <div class="section-title">Look at a tile and hold your gaze to click it</div>
+  <div class="grid">
+    <div class="tile gaze-target" data-name="Music"><span class="icon">🎵</span>Music<small>Play something</small></div>
+    <div class="tile gaze-target" data-name="Messages"><span class="icon">💬</span>Messages<small>Open chats</small></div>
+    <div class="tile gaze-target" data-name="Camera"><span class="icon">📷</span>Camera<small>Take a photo</small></div>
+    <div class="tile gaze-target" data-name="Maps"><span class="icon">🗺️</span>Maps<small>Navigate</small></div>
+    <div class="tile gaze-target" data-name="Lights ON" data-toggle="1"><span class="icon">💡</span>Lights<small>Toggle on / off</small></div>
+    <div class="tile gaze-target" data-name="Call Help" ><span class="icon">🆘</span>Call for help<small>Emergency</small></div>
+  </div>
+
+  <div class="section-title">Scroll down with your eyes to see more</div>
+  <div class="grid">
+    <div class="tile gaze-target" data-name="Yes"><span class="icon">✅</span>Yes</div>
+    <div class="tile gaze-target" data-name="No"><span class="icon">❌</span>No</div>
+    <div class="tile gaze-target" data-name="Water"><span class="icon">💧</span>I need water</div>
+    <div class="tile gaze-target" data-name="Food"><span class="icon">🍽️</span>I'm hungry</div>
+  </div>
+
+  <div class="section-title">Action log</div>
+  <div id="log">Waiting for your first eye click…</div>
+</div>
+
+<div id="toast" style="display:none"></div>
+
+<script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
+<script>
+(() => {
+  // ---------------- config ----------------
+  const DWELL_MS = 1500;          // stare this long to click
+  const COOLDOWN_MS = 1200;       // wait after a click before next
+  const SMOOTHING = 12;           // gaze samples in moving average
+  const SCROLL_ZONE = 0.12;       // top/bottom 12% of screen scrolls
+  const SCROLL_SPEED = 14;        // px per frame while in zone
+  const CLICKS_PER_DOT = 5;
+  const ARC_LEN = 138.2;
+
+  // ---------------- state ----------------
+  let samples = [];
+  let gx = innerWidth/2, gy = innerHeight/2;
+  let dwellTarget = null, dwellStart = 0, lastClick = 0;
+  let tracking = false, paused = false, camVisible = true;
+  let mode = 'start'; // start | calib | main
+
+  const $ = s => document.querySelector(s);
+  const cursor = $('#gazeCursor'), arc = $('#dwellArc');
+
+  // ---------------- helpers ----------------
+  function show(screenId){
+    document.querySelectorAll('.screen,#mainScreen').forEach(e=>e.classList.remove('active'));
+    $(screenId).classList.add('active');
+  }
+  function toast(msg){
+    const t = $('#toast');
+    t.style.display='block'; t.textContent = msg;
+    requestAnimationFrame(()=>t.classList.add('show'));
+    setTimeout(()=>{t.classList.remove('show');},1800);
+  }
+  function log(msg){
+    const el = $('#log');
+    const time = new Date().toLocaleTimeString();
+    el.innerHTML = `[${time}] ${msg}<br>` + el.innerHTML;
+  }
+
+  // ---------------- start ----------------
+  $('#startBtn').addEventListener('click', async () => {
+    $('#startBtn').textContent = 'Starting camera…';
+    try{
+      webgazer.params.showVideoPreview = true;
+      await webgazer.setRegression('ridge')
+        .setGazeListener(onGaze)
+        .begin();
+      webgazer.showPredictionPoints(false);
+      if (webgazer.applyKalmanFilter) webgazer.applyKalmanFilter(true);
+      tracking = true;
+      buildCalibration();
+    }catch(e){
+      $('#startBtn').textContent = 'Turn on eye tracking';
+      alert('Could not start webcam. Allow camera permission and use HTTPS (or localhost), then try again.');
+    }
+  });
+
+  // ---------------- calibration ----------------
+  const calibPoints = [
+    [ .07,.10],[ .5,.10],[ .93,.10],
+    [ .07,.5 ],[ .5,.5 ],[ .93,.5 ],
+    [ .07,.90],[ .5,.90],[ .93,.90],
+  ];
+  let calibDone = 0;
+
+  function buildCalibration(){
+    mode = 'calib'; calibDone = 0;
+    document.querySelectorAll('.calib-dot').forEach(d=>d.remove());
+    show('#calibScreen');
+    calibPoints.forEach((p,i)=>{
+      const d = document.createElement('div');
+      d.className='calib-dot';
+      d.style.left = `calc(${p[0]*100}% - 23px)`;
+      d.style.top  = `calc(${p[1]*100}% - 23px)`;
+      d.dataset.count = 0;
+      d.textContent = CLICKS_PER_DOT;
+      d.addEventListener('click', ()=>{
+        let c = ++d.dataset.count;
+        d.textContent = CLICKS_PER_DOT - c;
+        d.style.background = `hsl(${(c/CLICKS_PER_DOT)*160} 70% 45%)`;
+        if(c >= CLICKS_PER_DOT){
+          d.classList.add('done'); d.textContent='✓';
+          calibDone++;
+          $('#calibProgress').textContent = `${calibDone} / 9 points done`;
+          if(calibDone === calibPoints.length) finishCalibration();
+        }
+      });
+      document.body.appendChild(d);
+    });
+  }
+
+  function finishCalibration(){
+    document.querySelectorAll('.calib-dot').forEach(d=>d.remove());
+    mode = 'main';
+    show('#mainScreen');
+    cursor.style.display = 'block';
+    toast('Eye control is ON');
+    log('Calibration complete — eye control active.');
+  }
+
+  // ---------------- gaze pipeline ----------------
+  function onGaze(data){
+    if(!data || paused) return;
+    samples.push([data.x, data.y]);
+    if(samples.length > SMOOTHING) samples.shift();
+    gx = samples.reduce((a,s)=>a+s[0],0)/samples.length;
+    gy = samples.reduce((a,s)=>a+s[1],0)/samples.length;
+    gx = Math.max(0, Math.min(innerWidth,  gx));
+    gy = Math.max(0, Math.min(innerHeight, gy));
+  }
+
+  function frame(){
+    requestAnimationFrame(frame);
+    if(mode !== 'main' || paused) return;
+
+    cursor.style.transform = `translate(${gx}px, ${gy}px)`;
+
+    // --- edge scrolling ---
+    const topZone = gy < innerHeight*SCROLL_ZONE;
+    const botZone = gy > innerHeight*(1-SCROLL_ZONE);
+    $('#hintTop').classList.toggle('show', topZone);
+    $('#hintBottom').classList.toggle('show', botZone);
+    if(topZone) window.scrollBy(0,-SCROLL_SPEED);
+    if(botZone) window.scrollBy(0, SCROLL_SPEED);
+
+    // --- dwell click ---
+    if(Date.now() - lastClick < COOLDOWN_MS){ resetDwell(); return; }
+    cursor.style.visibility='hidden';
+    let el = document.elementFromPoint(gx, gy);
+    cursor.style.visibility='visible';
+    let target = el ? el.closest('.gaze-target') : null;
+
+    if(target !== dwellTarget){
+      if(dwellTarget) dwellTarget.classList.remove('gaze-hover');
+      dwellTarget = target;
+      dwellStart = Date.now();
+      if(dwellTarget) dwellTarget.classList.add('gaze-hover');
+    }
+    if(dwellTarget){
+      const p = Math.min(1,(Date.now()-dwellStart)/DWELL_MS);
+      arc.style.strokeDashoffset = ARC_LEN*(1-p);
+      if(p >= 1){
+        lastClick = Date.now();
+        dwellTarget.classList.remove('gaze-hover');
+        eyeClick(dwellTarget);
+        resetDwell();
+      }
+    } else {
+      arc.style.strokeDashoffset = ARC_LEN;
+    }
+  }
+  function resetDwell(){
+    if(dwellTarget) dwellTarget.classList.remove('gaze-hover');
+    dwellTarget = null;
+    arc.style.strokeDashoffset = ARC_LEN;
+  }
+  requestAnimationFrame(frame);
+
+  // ---------------- actions ----------------
+  function eyeClick(el){
+    if(el.id === 'pauseBtn'){ togglePause(); return; }
+    if(el.id === 'recalBtn'){ buildCalibration(); toast('Recalibrating'); return; }
+    if(el.id === 'camBtn'){ toggleCam(); return; }
+    const name = el.dataset.name || el.textContent.trim();
+    if(el.dataset.toggle){
+      el.classList.toggle('activated');
+      const on = el.classList.contains('activated');
+      toast(`Lights ${on ? 'ON 💡' : 'OFF'}`);
+      log(`Toggled: Lights ${on ? 'ON' : 'OFF'}`);
+    }else{
+      toast(`👁 Clicked: ${name}`);
+      log(`Eye click → <b>${name}</b>`);
+      el.classList.add('activated');
+      setTimeout(()=>el.classList.remove('activated'), 600);
+    }
+  }
+
+  function togglePause(){
+    paused = !paused;
+    $('#pauseBtn').textContent = paused ? '▶ Resume tracking' : '⏸ Pause tracking';
+    $('#statusTxt').textContent = paused ? 'Paused — mouse still works' : 'Eye tracking active — dwell 1.5s to click';
+    cursor.style.display = paused ? 'none' : 'block';
+    if(paused){ webgazer.pause(); } else { webgazer.resume(); }
+  }
+  function toggleCam(){
+    camVisible = !camVisible;
+    webgazer.showVideo(camVisible);
+    webgazer.showFaceOverlay(camVisible);
+    webgazer.showFaceFeedbackBox(camVisible);
+    $('#camBtn').textContent = camVisible ? '📷 Hide camera' : '📷 Show camera';
+  }
+
+  // keyboard safety: Space = pause, R = recalibrate
+  addEventListener('keydown', e=>{
+    if(mode!=='main') return;
+    if(e.code==='Space'){ e.preventDefault(); togglePause(); }
+    if(e.key==='r' || e.key==='R'){ buildCalibration(); }
+  });
+})();
+</script>
+</body>
+</html>
