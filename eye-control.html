@@ -182,7 +182,7 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
 
 <div id="toast" style="display:none"></div>
 
-<script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
+<script src="./webgazer.js"></script>
 <script>
 (() => {
   // ---------------- config ----------------
@@ -223,7 +223,38 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
 
   // ---------------- start ----------------
   $('#startBtn').addEventListener('click', async () => {
-    $('#startBtn').textContent = 'Starting camera…';
+    const btn = $('#startBtn');
+    btn.textContent = 'Starting…';
+
+    // 1. Library loaded?
+    if (typeof webgazer === 'undefined'){
+      btn.textContent = 'Turn on eye tracking';
+      alert('Tracking library (webgazer.js) did not load. Check that webgazer.js is on the server, then hard-refresh (Ctrl+Shift+R).');
+      return;
+    }
+    // 2. Camera API available? (needs HTTPS)
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      btn.textContent = 'Turn on eye tracking';
+      alert('This browser cannot access the camera here. Open the page over HTTPS in Chrome.');
+      return;
+    }
+    // 3. Test camera directly so we see the REAL error
+    try{
+      const test = await navigator.mediaDevices.getUserMedia({video:true});
+      test.getTracks().forEach(t=>t.stop());
+    }catch(e){
+      btn.textContent = 'Turn on eye tracking';
+      const why = {
+        NotAllowedError:'Camera permission is blocked. Click the lock/camera icon in the address bar → Allow camera → reload.',
+        NotFoundError:'No webcam found on this device.',
+        NotReadableError:'Webcam is busy — another app (Zoom/Teams/Camera) is using it. Close it and retry.',
+        SecurityError:'Page is not on HTTPS.'
+      }[e.name] || (e.name+': '+e.message);
+      alert('Camera problem → ' + why);
+      return;
+    }
+    // 4. Start eye tracking
+    btn.textContent = 'Loading eye model…';
     try{
       webgazer.params.showVideoPreview = true;
       await webgazer.setRegression('ridge')
@@ -234,8 +265,8 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
       tracking = true;
       buildCalibration();
     }catch(e){
-      $('#startBtn').textContent = 'Turn on eye tracking';
-      alert('Could not start webcam. Allow camera permission and use HTTPS (or localhost), then try again.');
+      btn.textContent = 'Turn on eye tracking';
+      alert('Eye tracker failed to start → ' + (e && (e.name+': '+e.message) || e) + '\nCheck that the mediapipe/face_mesh folder is on the server, then hard-refresh.');
     }
   });
 
