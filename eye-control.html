@@ -152,7 +152,8 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
     <button class="chip gaze-target" id="pauseBtn">⏸ Pause tracking</button>
     <button class="chip gaze-target" id="recalBtn">🎯 Recalibrate</button>
     <button class="chip gaze-target" id="camBtn">📷 Hide camera</button>
-    <span class="status" id="statusTxt">Eye tracking active — dwell 1.5s to click</span>
+    <button class="chip gaze-target" id="blinkBtn">😉 Blink click: ON</button>
+    <span class="status" id="statusTxt">Eye tracking active — stare 1.5s OR blink ½ sec to click</span>
   </div>
 
   <div id="hintTop" class="scroll-hint">▲ scrolling up</div>
@@ -333,19 +334,22 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
 
   // ---------------- gaze pipeline ----------------
   let rawx = innerWidth/2, rawy = innerHeight/2;
+  const median = a => { const s=[...a].sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; };
   function onGaze(data){
-    if(!data || paused) return;
+    if(!data || paused || eyesClosed) return;   // freeze cursor during blinks
     samples.push([data.x, data.y]);
     if(samples.length > SMOOTHING) samples.shift();
-    let mx = samples.reduce((a,s)=>a+s[0],0)/samples.length;
-    let my = samples.reduce((a,s)=>a+s[1],0)/samples.length;
-    // dead zone: tiny jitters don't move the cursor
+    // median filter kills outlier spikes far better than averaging
+    let mx = median(samples.map(s=>s[0]));
+    let my = median(samples.map(s=>s[1]));
     const dist = Math.hypot(mx-rawx, my-rawy);
     if(dist < DEADZONE){
-      const damp = dist/DEADZONE * 0.15;
+      const damp = dist/DEADZONE * 0.12;
       rawx += (mx-rawx)*damp; rawy += (my-rawy)*damp;
     }else{
-      rawx += (mx-rawx)*EMA; rawy += (my-rawy)*EMA;
+      // adaptive: small correction = slow & stable, big jump = fast
+      const e = Math.min(0.6, 0.18 + dist/500);
+      rawx += (mx-rawx)*e; rawy += (my-rawy)*e;
     }
     gx = Math.max(0, Math.min(innerWidth,  rawx));
     gy = Math.max(0, Math.min(innerHeight, rawy));
@@ -362,6 +366,49 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
       if(best){ gx += (best[0]-gx)*0.5; gy += (best[1]-gy)*0.5; }
     }
   }
+
+  // ---------------- blink to click ----------------
+  // Eye Aspect Ratio from the face mesh: eye height / eye width.
+  // Deliberate blink = both eyes closed 250–900ms, then open → click where you were looking.
+  let blinkMode = true, eyesClosed = false, closedAt = 0, earBase = 0.30, blinkFrozen = [0,0];
+  function earOf(p,u,l,a,b){
+    if(!p[u]||!p[l]||!p[a]||!p[b]) return earBase;
+    const v = Math.hypot(p[u][0]-p[l][0], p[u][1]-p[l][1]);
+    const h = Math.hypot(p[a][0]-p[b][0], p[a][1]-p[b][1]);
+    return h ? v/h : earBase;
+  }
+  function pollBlink(){
+    if(!blinkMode || mode!=='main' || paused) return;
+    try{
+      const tr = webgazer.getTracker && webgazer.getTracker();
+      const p  = tr && tr.getPositions && tr.getPositions();
+      if(!p || !Array.isArray(p) || p.length < 400) return;
+      const ear = ( earOf(p,159,145,33,133) + earOf(p,386,374,362,263) ) / 2;
+      if(!eyesClosed){
+        if(ear < earBase*0.55){
+          eyesClosed = true; closedAt = Date.now(); blinkFrozen = [gx,gy];
+        }else{
+          earBase = earBase*0.98 + ear*0.02;  // slowly learn your normal open-eye ratio
+        }
+      }else if(ear > earBase*0.75){
+        const dur = Date.now() - closedAt;
+        eyesClosed = false;
+        if(dur >= 250 && dur <= 900 && Date.now()-lastClick > COOLDOWN_MS){
+          blinkClickAt(blinkFrozen[0], blinkFrozen[1]);
+        }
+      }else if(Date.now()-closedAt > 3000){
+        eyesClosed = false;  // eyes resting — never treat as click
+      }
+    }catch(e){}
+  }
+  function blinkClickAt(x,y){
+    cursor.style.visibility='hidden';
+    const el = document.elementFromPoint(x,y);
+    cursor.style.visibility='visible';
+    const t = el && el.closest('.gaze-target');
+    if(t){ lastClick = Date.now(); eyeClick(t); resetDwell(); }
+  }
+  setInterval(pollBlink, 50);
 
   function frame(){
     requestAnimationFrame(frame);
@@ -420,6 +467,12 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
     if(el.id === 'pauseBtn'){ togglePause(); return; }
     if(el.id === 'recalBtn'){ startRecalibration(); toast('Recalibrating'); return; }
     if(el.id === 'camBtn'){ toggleCam(); return; }
+    if(el.id === 'blinkBtn'){
+      blinkMode = !blinkMode;
+      el.textContent = blinkMode ? '😉 Blink click: ON' : '😉 Blink click: OFF';
+      toast(blinkMode ? 'Blink to click enabled' : 'Blink to click off — dwell only');
+      return;
+    }
     const name = el.dataset.name || el.textContent.trim();
     if(el.dataset.toggle){
       el.classList.toggle('activated');
@@ -437,7 +490,7 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
   function togglePause(){
     paused = !paused;
     $('#pauseBtn').textContent = paused ? '▶ Resume tracking' : '⏸ Pause tracking';
-    $('#statusTxt').textContent = paused ? 'Paused — mouse still works' : 'Eye tracking active — dwell 1.5s to click';
+    $('#statusTxt').textContent = paused ? 'Paused — mouse still works' : 'Eye tracking active — stare 1.5s OR blink ½ sec to click';
     cursor.style.display = paused ? 'none' : 'block';
     if(paused){ webgazer.pause(); } else { webgazer.resume(); }
   }
