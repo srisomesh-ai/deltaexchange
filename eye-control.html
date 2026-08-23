@@ -186,6 +186,7 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
 <div id="toast" style="display:none"></div>
 
 <script src="./webgazer.js"></script>
+<script src="./mediapipe/hands/hands.js"></script>
 <script>
 (() => {
   // ---------------- config ----------------
@@ -341,7 +342,7 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
   const median = a => { const s=[...a].sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; };
   function onGaze(data){
     if(!data || paused || eyesClosed) return;   // freeze cursor during blinks
-    if(pointerMode === 'nose') return;          // nose drives the cursor in nose mode
+    if(pointerMode === 'nose' || pointerMode === 'hand') return;  // other pointers drive the cursor
     samples.push([data.x, data.y]);
     if(samples.length > SMOOTHING) samples.shift();
     // median filter kills outlier spikes far better than averaging
@@ -402,6 +403,79 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
     if(lockedEl) lockedEl.classList.remove('gaze-lock');
     lockedEl = el;
     if(lockedEl) lockedEl.classList.add('gaze-lock');
+  }
+
+  // ---------------- hand pointer (MediaPipe Hands) ----------------
+  // ☝️ index up = move cursor | 🤏 pinch thumb+index = click
+  // 👇 index pointing down = scroll down | 👍 thumbs up = scroll up
+  let handsAI = null, handBusy = false, handTimer = null;
+  let pinched = false, handScroll = 0, handSeen = false;
+  const HAND_BOX = {x0:0.22, x1:0.78, y0:0.25, y1:0.80}; // hand area of camera → full screen
+
+  function d2(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function onHands(res){
+    handBusy = false;
+    const hl = res.multiHandLandmarks && res.multiHandLandmarks[0];
+    handScroll = 0;
+    if(!hl){ handSeen = false; return; }
+    handSeen = true;
+    const wrist = hl[0];
+    const scale = d2(wrist, hl[9]) || 0.1;          // palm size = distance scale
+    const curled = (tip,pip) => d2(hl[tip],wrist) < d2(hl[pip],wrist)*1.1;
+    const idxUp   = hl[8].y < hl[6].y - 0.02;       // index tip above its middle joint
+    const idxDown = hl[8].y > hl[6].y + 0.02;
+    const midCurl = curled(12,10), ringCurl = curled(16,14), pinkCurl = curled(20,18);
+    const pinchRatio = d2(hl[4], hl[8]) / scale;
+
+    // 1) PINCH = click (with hysteresis)
+    if(!pinched && pinchRatio < 0.45){
+      pinched = true;
+      if(Date.now()-lastClick > COOLDOWN_MS) blinkClickAt(gx, gy);
+    }else if(pinched && pinchRatio > 0.65){
+      pinched = false;
+    }
+    if(pinched) return;                              // cursor frozen while pinching
+
+    // 2) THUMBS UP (index+middle curled, thumb above wrist) = scroll up
+    const thumbUp = hl[4].y < wrist.y - scale*0.9 && curled(8,6) && midCurl;
+    if(thumbUp){ handScroll = -1; return; }
+
+    // 3) INDEX POINTING DOWN (others curled) = scroll down
+    if(idxDown && midCurl && ringCurl){ handScroll = 1; return; }
+
+    // 4) INDEX UP = move cursor (mirrored so it feels natural)
+    if(idxUp){
+      const nx = 1 - Math.max(0, Math.min(1, (hl[8].x - HAND_BOX.x0)/(HAND_BOX.x1-HAND_BOX.x0)));
+      const ny =     Math.max(0, Math.min(1, (hl[8].y - HAND_BOX.y0)/(HAND_BOX.y1-HAND_BOX.y0)));
+      const tx = nx*innerWidth, ty = ny*innerHeight;
+      rawx += (tx-rawx)*0.45; rawy += (ty-rawy)*0.45;
+      gx = rawx; gy = rawy;
+      applyLock();
+    }
+  }
+
+  async function startHands(){
+    if(!window.Hands){ toast('Hand model files missing on server'); return false; }
+    if(!handsAI){
+      handsAI = new Hands({locateFile: f => './mediapipe/hands/' + f});
+      handsAI.setOptions({maxNumHands:1, modelComplexity:0, minDetectionConfidence:0.6, minTrackingConfidence:0.5, selfieMode:false});
+      handsAI.onResults(onHands);
+    }
+    const video = document.getElementById('webgazerVideoFeed');
+    if(!video){ toast('Camera video not found'); return false; }
+    try{ webgazer.pause(); }catch(e){}                // save CPU: face tracking off in hand mode
+    handTimer = setInterval(async ()=>{
+      if(handBusy || paused || video.readyState < 2) return;
+      handBusy = true;
+      try{ await handsAI.send({image: video}); }catch(e){ handBusy=false; }
+    }, 40);
+    return true;
+  }
+  function stopHands(){
+    if(handTimer){ clearInterval(handTimer); handTimer = null; }
+    handScroll = 0; pinched = false;
+    try{ webgazer.resume(); }catch(e){}
   }
 
   // ---------------- nose pointer ----------------
@@ -475,9 +549,15 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
 
     cursor.style.transform = `translate(${gx}px, ${gy}px)`;
 
-    // --- edge scrolling (off while locked on a button) ---
-    const topZone = !lockedEl && gy < innerHeight*SCROLL_ZONE;
-    const botZone = !lockedEl && gy > innerHeight*(1-SCROLL_ZONE);
+    // --- scrolling ---
+    let topZone=false, botZone=false;
+    if(pointerMode==='hand'){
+      topZone = handScroll === -1;                  // 👍 thumbs up
+      botZone = handScroll === 1;                   // 👇 index down
+    }else{
+      topZone = !lockedEl && gy < innerHeight*SCROLL_ZONE;
+      botZone = !lockedEl && gy > innerHeight*(1-SCROLL_ZONE);
+    }
     $('#hintTop').classList.toggle('show', topZone);
     $('#hintBottom').classList.toggle('show', botZone);
     if(topZone) window.scrollBy(0,-SCROLL_SPEED);
@@ -527,12 +607,19 @@ p.lead{color:var(--dim);max-width:560px;margin:14px 0 28px;font-size:1.05rem;lin
     if(el.id === 'recalBtn'){ startRecalibration(); toast('Recalibrating'); return; }
     if(el.id === 'camBtn'){ toggleCam(); return; }
     if(el.id === 'pointerBtn'){
-      pointerMode = (pointerMode==='eyes') ? 'nose' : 'eyes';
-      noseBase = null;   // recapture neutral head position
-      el.textContent = pointerMode==='nose' ? '👃 Pointer: Nose' : '👁 Pointer: Eyes';
-      toast(pointerMode==='nose'
-        ? 'Nose pointer ON — sit straight, then move your head'
-        : 'Eye pointer ON');
+      const order = ['eyes','nose','hand'];
+      const next = order[(order.indexOf(pointerMode)+1) % order.length];
+      if(pointerMode==='hand') stopHands();
+      pointerMode = next;
+      noseBase = null;
+      if(pointerMode==='hand'){
+        startHands().then(ok=>{ if(!ok){ pointerMode='eyes'; el.textContent='👁 Pointer: Eyes'; } });
+      }
+      el.textContent = pointerMode==='nose' ? '👃 Pointer: Nose'
+                     : pointerMode==='hand' ? '✋ Pointer: Hand' : '👁 Pointer: Eyes';
+      toast(pointerMode==='nose' ? 'Nose pointer ON — sit straight, then move your head'
+          : pointerMode==='hand' ? 'Hand ON — ☝️ move · 🤏 click · 👇 scroll dn · 👍 scroll up'
+          : 'Eye pointer ON');
       return;
     }
     if(el.id === 'blinkBtn'){
