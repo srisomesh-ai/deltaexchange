@@ -136,7 +136,7 @@
 <script>
 /* ===== LOGIN GATE ===== */
 // Credentials are stored as SHA-256 hashes so they are not readable in the page source.
-// Default: user "somu" / password "Somu@2026" — change via changeLogin() in console or ask to update.
+// To change the login: run  await sha256("NewPassword")  in the browser console and paste the result into passHash.
 const AUTH={
   user:'somu',
   passHash:'49bb49b64643c9f971be6df842a4104bffe8f1ebffbf822ec6acf82e2540a391'
@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v61</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v64</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -255,7 +255,8 @@ if(sessionStorage.getItem('dx_auth')==='1'){
           <div id="robotStatus" class="robot-status">
             <div class="st" id="rsStateWrap"><span id="rsLight" style="width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block"></span><span id="rsState">Robot Off</span></div>
             <div class="dt" id="rsDetail">Turn on the engine, then auto-pilot to arm the robot.</div>
-            
+            <button onclick="whyNoTrades()" style="margin-top:9px;font-size:11px;padding:6px 12px">🔍 Why no trades?</button>
+            <div id="whyOut" style="display:none;margin-top:8px;font-size:11px;line-height:1.5"></div>
           </div>
           <div class="gauge">
             <div class="dir-big" id="sigDir" style="color:var(--muted)">NEUTRAL</div>
@@ -287,22 +288,34 @@ if(sessionStorage.getItem('dx_auth')==='1'){
       </div>
 
       <div class="card">
-        <div class="card-h"><span class="l"><span class="mk"></span>Auto-Pilot Settings</span></div>
+        <div class="card-h"><span class="l"><span class="mk"></span>Money Control</span></div>
         <div class="card-b">
+          <!-- real balance straight from Delta (robot panel's own fetch, every 15s) -->
+          <div style="background:var(--navy);border-radius:9px;padding:12px 14px;margin-bottom:12px;color:#fff">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:#b9c4d6;letter-spacing:.3px">DELTA BALANCE <span id="robotBalEnv"></span></span>
+              <button onclick="refreshRobotBalance()" style="font-size:10px;padding:3px 9px;background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.2)">↻</button>
+            </div>
+            <div id="robotBal" class="num" style="font-size:22px;font-weight:700;margin-top:2px">—</div>
+            <div id="robotBalSub" class="num" style="font-size:11px;color:#b9c4d6">Connect the proxy to load your real balance.</div>
+          </div>
           <div class="row2">
-            <div class="fld"><label>Balance % per trade</label><input id="botPct" type="number" step="1" value="10"></div>
+            <div class="fld"><label>Money per trade ($)</label><input id="botMoney" type="number" step="any" min="0" value="5"></div>
+            <div class="fld"><label>Leverage (x)</label><input id="botLev" type="number" step="1" value="2" min="1" max="25"></div>
+          </div>
+          <div class="row2">
+            <div class="fld"><label>Stop-loss %</label><input id="botSL" type="number" step="0.1" value="0.5"></div>
+            <div class="fld"><label>Take-profit %</label><input id="botTP" type="number" step="0.1" value="1.0"></div>
+          </div>
+          <div class="row2">
+            <div class="fld"><label>Max loss per day ($)</label><input id="dailyLimit" type="number" step="any" value="3" placeholder="3"></div>
             <div class="fld"><label>Max lots per trade</label><input id="botMaxLots" type="number" step="1" value="50"></div>
           </div>
-          <div class="row2">
-            <div class="fld"><label>Robot stop-loss %</label><input id="botSL" type="number" step="0.1" value="0.5"></div>
-            <div class="fld"><label>Robot take-profit %</label><input id="botTP" type="number" step="0.1" value="1.0"></div>
-          </div>
-          <div class="fld"><label>Robot leverage (low = safer)</label><input id="botLev" type="number" step="1" value="2" min="1" max="25"></div>
-          <div class="fld"><label>Trail step % (profit-lock)</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
-          <div id="sizeCalc" class="num" style="font-size:10px;color:var(--muted);margin-bottom:4px"></div>
-          <div style="font-size:10px;color:var(--muted)">Lots = balance × % × leverage ÷ coin price, capped by Max lots. That is all the robot uses.</div>
-          <input id="botSize" type="hidden" value="1"><input id="sizeMode" type="hidden" value="pct">
-          <span id="sizeLbl" class="hidden"></span>
+          <div id="sizeCalc" class="num" style="font-size:11px;line-height:1.55;background:#f8fafc;border:1px solid var(--line);border-radius:7px;padding:9px 11px;margin-bottom:8px"></div>
+          <details><summary style="cursor:pointer;font-size:11px;color:var(--muted);font-weight:600">Advanced</summary>
+            <div class="fld" style="margin-top:8px"><label>Trail step % (profit-lock)</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
+          </details>
+          <input id="botSize" type="hidden" value="1">
         </div>
       </div>
 
@@ -359,16 +372,15 @@ if(sessionStorage.getItem('dx_auth')==='1'){
         <div class="card-h"><span class="l"><span class="mk"></span>Risk Guard</span></div>
         <div class="card-b">
           <div class="row2">
-            <div class="fld"><label>Daily loss limit</label><input id="dailyLimit" type="number" step="any" value="3" placeholder="3"></div>
-            <div class="fld"><label>Live PnL</label><input id="todayPnl" type="number" step="any" value="0" readonly style="background:#eef1f5"></div>
+            <div class="fld"><label>Today's PnL</label><input id="todayPnl" type="number" step="any" value="0" readonly style="background:#eef1f5"></div>
           </div>
-          <div id="guardMsg" style="font-size:11px;color:var(--muted)">Blocks new entries past the loss limit. Open positions untouched.</div>
+          <div id="guardMsg" style="font-size:11px;color:var(--muted)">Stops the robot and blocks new entries once today's loss reaches <b>Max loss per day</b> (set in Money Control). Open positions keep their SL/TP.</div>
         </div>
       </div>
 
       <div class="card">
         <div class="card-h"><span class="l"><span class="mk"></span>Account</span>
-          <span class="dim" style="font-weight:400;font-size:10px;display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span>live</span></div>
+          <span class="dim" style="font-weight:400;font-size:10px;display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span>auto-refresh</span></div>
         <div class="card-b">
           <div class="tabs">
             <button class="act" onclick="posTab('pos',this)">Positions</button>
@@ -637,7 +649,7 @@ function setEnv(e){
   ENV=e; localStorage.setItem('dx_env',e);
   refreshEnvUI();
   if(typeof updateRobotStatus==='function')updateRobotStatus();
-  loadProducts(); loadBalance();
+  loadProducts(); loadBalance(); availBalance=0; refreshRobotBalance();
   log('switched to '+e.toUpperCase()+(e==='testnet'?' — 📡 signals from LIVE market data, orders on DEMO':''));
 }
 function refreshEnvUI(){
@@ -669,7 +681,7 @@ function saveCfg(){
   loadProducts().then(()=>{
     $('cfgMsg').textContent = products.length ? ('✓ '+products.length+' markets loaded') : '✗ no data — check URL';
   });
-  loadBalance();
+  loadBalance(); refreshRobotBalance();
   // pull any settings saved from another device, then restore log
   cloudLoad().then(loaded=>{
     if(loaded){try{const h=localStorage.getItem('dx_log');if(h)$('autolog').textContent=h;}catch(e){}
@@ -780,14 +792,43 @@ async function loadPositions(){
         if(closedProdId)cleanupStops(closedProdId);
       }
     }
-    // feed live PnL into the risk guard
-    const totPnl=(j.result||[]).reduce((s,p)=>s+(+p.unrealized_pnl||0),0);
-    if($('todayPnl'))$('todayPnl').value=totPnl.toFixed(2);
-    checkGuard();
+    // feed today's PnL (closed trades + fees + open uPnL) into the risk guard
+    refreshDayPnl(j.result).catch(()=>{});
     if(!rows.length){$('posBox').innerHTML='<div class="dim">No open positions.</div>';return;}
     $('posBox').innerHTML='<table><tr><th>Sym</th><th>Size</th><th>Entry</th><th>uPnL</th></tr>'+
       rows.map(p=>`<tr><td>${p.product_symbol||p.product_id}</td><td class="${+p.size>0?'g':'r'}">${p.size}</td><td>${fmt(+p.entry_price,priceDp())}</td><td class="${+p.unrealized_pnl>=0?'g':'r'}">${fmt(+p.unrealized_pnl,2)}</td></tr>`).join('')+'</table>';
   }catch(e){$('posBox').innerHTML='<div class="r">'+e.message+'</div>';}
+}
+/* ===== TODAY'S PnL: wallet equity now vs. start of day =====
+   equity = settle-currency wallet balance + unrealized PnL of open positions.
+   The first reading of each calendar day (per env) is the baseline, so closed
+   trades, fees and the open trade all count. Deposits/withdrawals during the
+   day shift it too. Wallet balance is cached 15s unless fresh is requested. */
+let walletCache={t:0,bal:null};
+async function refreshDayPnl(positions, fresh){
+  if(!PROXY)return null;
+  if(fresh || walletCache.bal===null || Date.now()-walletCache.t>15000){
+    const bj=await proxy('GET','/v2/wallet/balances');
+    if(bj.success===false)throw new Error('balance: '+JSON.stringify(bj.error));
+    const all=bj.result||[];
+    const settle=all.find(b=>/USD/i.test(b.asset_symbol||b.asset?.symbol||b.symbol||''))||all[0];
+    if(!settle)throw new Error('no settle-currency balance');
+    walletCache={t:Date.now(),bal:+(settle.balance ?? settle.wallet_balance ?? settle.available_balance ?? 0)};
+  }
+  if(!positions){
+    const pj=await proxy('GET','/v2/positions/margined');
+    if(pj.success===false)throw new Error('positions: '+JSON.stringify(pj.error));
+    positions=pj.result||[];
+  }
+  const upnl=positions.reduce((s,p)=>s+(+p.size!==0?(+p.unrealized_pnl||0):0),0);
+  const equity=walletCache.bal+upnl;
+  const key='dx_dayStart_'+ENV, today=new Date().toDateString();
+  let start=null; try{start=JSON.parse(localStorage.getItem(key)||'null');}catch(e){}
+  if(!start||start.d!==today||!isFinite(start.eq)){start={d:today,eq:equity};localStorage.setItem(key,JSON.stringify(start));}
+  const pnl=equity-start.eq;
+  if($('todayPnl'))$('todayPnl').value=pnl.toFixed(2);
+  checkGuard();
+  return pnl;
 }
 function checkGuard(){
   const lim=+$('dailyLimit').value||0;
@@ -1031,30 +1072,6 @@ function valAgo(arr,ms,key){
   return old? old[key] : null;
 }
 
-/* ===== TREND FILTER: multi-minute direction from candles ===== */
-// caches trend per symbol so we don't hammer the API; refreshes each entry ~2min
-const trendCache={};  // sym -> {t, trend:-1..+1, dir:'up'/'down'/'flat'}
-async function getTrend(sym){
-  const c=trendCache[sym];
-  if(c && Date.now()-c.t < 120000) return c;  // 2-min cache
-  try{
-    // last ~30 min of 1-minute candles
-    const end=Math.floor(Date.now()/1000), start=end-1800;
-    const j=await pubGet('/v2/history/candles','?resolution=1m&symbol='+sym+'&start='+start+'&end='+end,'live');
-    const cd=(j.result||[]).slice().sort((a,b)=>a.time-b.time);
-    if(cd.length<10){const r={t:Date.now(),trend:0,dir:'flat'};trendCache[sym]=r;return r;}
-    const closes=cd.map(x=>+x.close);
-    // simple trend: compare short MA (last 5) vs long MA (last 20), normalized
-    const maShort=closes.slice(-5).reduce((a,b)=>a+b,0)/5;
-    const maLong=closes.slice(-20).reduce((a,b)=>a+b,0)/Math.min(20,closes.length);
-    const slope=(maShort-maLong)/maLong;             // +ve = uptrend
-    const trend=Math.max(-1,Math.min(1, slope*200));  // scale
-    const dir = trend>0.15?'up' : trend<-0.15?'down' : 'flat';
-    const r={t:Date.now(),trend:+trend.toFixed(3),dir};
-    trendCache[sym]=r; return r;
-  }catch(e){const r={t:Date.now(),trend:0,dir:'flat'};trendCache[sym]=r;return r;}
-}
-
 function runSignal(imb){
   // always update history + component displays
   const mark=+ticker.mark_price;
@@ -1111,7 +1128,7 @@ function runSignal(imb){
     $('jCount').textContent=journal.length;
     log(`▶ ${dir} @ ${fmt(mark,priceDp())}  score=${score.toFixed(2)} [ob${obScore.toFixed(1)} mo${momPct.toFixed(2)} oi${(oiDelta*100).toFixed(1)} fu${(fr*100).toFixed(3)}]`);
 
-    // (Auto-execution is handled by the scanner-driven robotTick loop,
+    // (Auto-execution is handled by the SIMPLE MODE simpleTick loop,
     //  which auto-picks the strongest coin — not just the loaded one.)
 
     // capture this entry's own symbol so the 60s check compares the RIGHT coin
@@ -1284,7 +1301,6 @@ function updateRobotStatus(){
   const autoOn=$('autoExec')?.checked;
   const light=$('rsLight'), state=$('rsState'), detail=$('rsDetail'), box=$('robotStatus');
   if(!light)return;
-  const size=$('botSize')?.value||1, minS=$('botScore')?.value||0.45;
 
   // ── OPEN TRADE takes priority over everything ──
   // If a position is live (even after refresh with auto-pilot off), show it.
@@ -1348,9 +1364,7 @@ function updateRobotStatus(){
     }
     detail.innerHTML=`<b style="font-size:13px;color:var(--txt)">Trading: ${t.sym||cur.symbol}</b><br>Holding <b>${t.side.toUpperCase()}</b> ${t.size} @ ${fmt(t.entry,priceDp())}${trailTxt}`;
   }else{
-    const nextPick=lastScan.find(c=>c.dir!=='—' && c.strength>=(+($('botScore').value||0.45)));
-    const willTrade = nextPick ? `<b style="font-size:14px;color:var(--green)">Will trade: ${nextPick.sym} ${nextPick.dir}</b>` : `<span style="color:var(--dim)">Scanning for a coin above min strength…</span>`;
-    detail.innerHTML=`${willTrade}<br>Robot auto-picks the strongest coin from the scanner (size <b>${size}</b>, min strength <b>${minS}</b>) and trades it. One position at a time.`;
+    detail.innerHTML=`<span style="color:var(--dim)">Scanning every 20s for a mover ≥1%…</span><br>Robot trades the top mover (funding fade or momentum), sized from balance, with SL/TP. One position at a time.`;
   }
 }
 
@@ -1401,29 +1415,56 @@ function renderStats(){
     <div class="kv"><span class="lbl">Net after fees</span><span class="v" style="color:${netCol};font-size:15px">${net>=0?'+':''}${net.toFixed(2)}</span></div>`;
 }
 
-// compute how many contracts a %-of-balance works out to for a given coin
+/* ===== MONEY CONTROL: you set $ per trade, leverage, SL and max daily loss ===== */
+const FEE_RT=0.0012;   // ≈ round-trip taker fee (0.05%/side + 18% GST), estimate only
+function moneyCfg(){
+  return {money:+$('botMoney')?.value||0, lev:Math.max(1,parseInt($('botLev')?.value)||1),
+          sl:+$('botSL')?.value||0.5, tp:+$('botTP')?.value||1, dayMax:+$('dailyLimit')?.value||0,
+          maxLots:parseInt($('botMaxLots')?.value)||50};
+}
+// lots that fit inside (money × leverage) for this coin. 0 = one lot is bigger than your budget → coin skipped.
 function computeContracts(prod, price){
-  const mode=$('sizeMode')?.value||'pct';
-  if(mode==='fixed') return parseInt($('botPct').value)||1;   // reuse field as fixed count in fixed mode
-  const pct=(+$('botPct').value||10)/100;
-  const lev=parseInt($('botLev')?.value)||parseInt($('lev')?.value)||2;
-  const cv=prod.contract_value?+prod.contract_value:1;   // underlying per contract
-  // notional we want to control = balance * pct * leverage
-  const notional=availBalance*pct*lev;
-  const perContract=price*cv;                            // USD value of 1 contract
-  if(perContract<=0) return 1;
-  return Math.max(1, Math.floor(notional/perContract));
+  const c=moneyCfg();
+  const perContract=price*(prod.contract_value?+prod.contract_value:1);   // USD value of 1 lot
+  if(!(perContract>0)||!(c.money>0)) return 0;
+  return Math.min(Math.floor(c.money*c.lev/perContract), c.maxLots);
 }
 function updateSizeCalc(){
   const el=$('sizeCalc'); if(!el)return;
-  const mode=$('sizeMode')?.value||'pct';
-  if(mode==='fixed'){el.textContent='Fixed '+($('botPct').value||1)+' contracts per trade (same count every coin).';
-    if($('sizeLbl'))$('sizeLbl').textContent='Fixed contracts';return;}
-  if($('sizeLbl'))$('sizeLbl').textContent='Balance % per trade';
-  if(!availBalance){el.textContent='Connect + load balance to see auto lot size.';return;}
-  const pct=+$('botPct').value||10, lev=parseInt($('lev').value)||10;
-  el.innerHTML=`Using <b>${pct}%</b> of ${fmt(availBalance,2)} × ${lev}x = ${fmt(availBalance*pct/100*lev,2)} notional. Robot converts this to the right lots for each coin it picks.`;
+  const c=moneyCfg(), pos=c.money*c.lev;
+  const slLoss=pos*c.sl/100, tpWin=pos*c.tp/100, fee=pos*FEE_RT;
+  let warn='';
+  if(!(c.money>0))warn='<div class="r">⚠ Set Money per trade — robot will not trade with $0.</div>';
+  else if(availBalance && c.money>availBalance)warn='<div class="r">⚠ Money per trade ($'+fmt(c.money,2)+') is more than your available balance ($'+fmt(availBalance,2)+') — robot will not trade.</div>';
+  if(!(c.dayMax>0))warn+='<div class="r">⚠ No max loss per day set — LIVE arming is refused.</div>';
+  el.innerHTML=`Each trade: <b>$${fmt(c.money,2)}</b> × <b>${c.lev}x</b> = <b>$${fmt(pos,2)}</b> position<br>`+
+    `Stop-loss hit ≈ <b class="r">−$${fmt(slLoss+fee,2)}</b> · take-profit ≈ <b class="g">+$${fmt(tpWin-fee,2)}</b> <span class="dim">(incl. ≈$${fmt(fee,2)} fees)</span><br>`+
+    `Robot switches itself OFF after losing <b>$${fmt(c.dayMax,2)}</b> today. Coins where 1 lot is bigger than $${fmt(pos,2)} are skipped.`+warn;
 }
+// real balance from Delta for the robot panel (does not touch the Account tab)
+async function refreshRobotBalance(){
+  const big=$('robotBal'), sub=$('robotBalSub'), envEl=$('robotBalEnv');
+  if(envEl)envEl.innerHTML=ENV==='live'?'<span style="color:#ff8a8a">● LIVE</span>':'<span style="color:#7ee2a8">● TESTNET</span>';
+  if(!PROXY){if(sub)sub.textContent='Connect the proxy to load your real balance.';return;}
+  try{
+    const j=await proxy('GET','/v2/wallet/balances');
+    if(j.success===false)throw new Error(JSON.stringify(j.error));
+    const all=j.result||[];
+    const symOf=b=>b.asset_symbol||b.asset?.symbol||b.symbol||'';
+    const settle=all.find(b=>/USD/i.test(symOf(b)))||all[0];
+    if(!settle)throw new Error('no balance returned');
+    const wallet=+(settle.balance ?? settle.wallet_balance ?? settle.available_balance ?? 0);
+    availBalance=+(settle.available_balance ?? settle.balance ?? 0);
+    walletCache={t:Date.now(),bal:wallet};
+    if(big)big.textContent='$'+fmt(availBalance,2)+' available';
+    if(sub)sub.textContent=symOf(settle)+' wallet $'+fmt(wallet,2)+' · updated '+new Date().toLocaleTimeString();
+  }catch(e){
+    if(big)big.textContent='—';
+    if(sub)sub.textContent='⚠ could not load balance: '+e.message;
+  }
+  updateSizeCalc();
+}
+setInterval(()=>{if(PROXY)refreshRobotBalance();},15000);
 
 // ===== SCANNER-DRIVEN ROBOT: auto-picks best coin from scan, trades it =====
 // ── SAFETY NET: make sure an open position always has a stop-loss ──
@@ -1491,57 +1532,93 @@ async function cleanupStops(prodId){
   }catch(e){}
 }
 
-// ── ONE-TAP DIAGNOSTIC: checks every gate and reports in plain words ──
+// ── ONE-TAP DIAGNOSTIC: checks every SIMPLE MODE gate and reports in plain words ──
+// Mirrors simpleTick step by step (same mover ranking via rankMovers) but never places an order.
 async function whyNoTrades(){
   const out=[];
   const say=s=>out.push(s);
-  say('═══ ROBOT DIAGNOSTIC ═══');
+  say('═══ ROBOT DIAGNOSTIC ('+ENV.toUpperCase()+') ═══');
+  // own output box: rsDetail is redrawn every 3s by updateRobotStatus and would wipe this
+  const wo=$('whyOut'); if(wo){wo.style.display='block';wo.innerHTML='🔍 checking…';}
   if(!PROXY){say('❌ Proxy not connected — set URL + token and Connect. Robot cannot do anything.');finish();return;}
-  say('✓ proxy set · env: '+ENV.toUpperCase());
+  say('✓ proxy set');
   if(!products.length){say('❌ No markets loaded — Connect may have failed. Check proxy URL.');finish();return;}
   say('✓ '+products.length+' markets loaded');
-  say(($('sigOn')?.checked?'✓ Engine ON':'❌ Engine OFF — flip Start Robot'));
-  say(($('autoExec')?.checked?'✓ Auto-Pilot ARMED':'❌ Auto-Pilot OFF — flip Start Robot and confirm the dialog'));
-  if(robotOpenTrade){say('⛔ Robot tracking open trade: '+robotOpenTrade.sym+' '+(robotOpenTrade.side||'').toUpperCase()+' — will not open another until it closes. If old/stuck, close it on Delta.');}
+  if(!$('autoExec')?.checked){say('❌ Robot OFF — flip Start Robot and confirm the dialog.');}
+  else say('✓ Robot armed');
+  if($('autoExec')?.checked && !robotLoopTimer)say('❌ Robot armed but its 20s loop is not running — flip Start Robot off and on.');
+  else if(robotLoopTimer)say('✓ loop running (every 20s)'+(botBusy?' · busy with a tick right now':''));
   try{
     const pj=await proxy('GET','/v2/positions/margined');
+    if(pj.success===false){say('❌ positions check failed: '+JSON.stringify(pj.error)+' — robot stops here every tick.');finish();return;}
     const op=(pj.result||[]).find(p=>+p.size!==0);
-    if(op)say('⛔ OPEN POSITION on account: '+(op.product_symbol||op.product_id)+' size '+op.size+' — THIS BLOCKS ALL NEW TRADES. Close it on Delta to unblock.');
-    else say('✓ no open position blocking');
-  }catch(e){say('⚠ could not check positions: '+e.message);}
-  if(typeof guardBlocks==='function'&&guardBlocks())say('⛔ Daily loss limit HIT ('+$('dailyLimit').value+') — no new entries today.');
-  else say('✓ loss guard ok (limit '+($('dailyLimit').value||'none')+', PnL '+($('todayPnl').value||0)+')');
-  try{const tc=JSON.parse(localStorage.getItem('dx_tradeCount')||'{}');const maxT=+($('botMaxTrades')?.value||15);
-    if(tc.d===new Date().toDateString()&&tc.n>=maxT)say('⛔ Daily trade cap reached ('+tc.n+'/'+maxT+').');
-    else say('✓ trade cap ok ('+((tc.d===new Date().toDateString()&&tc.n)||0)+'/'+maxT+')');}catch(e){}
-  const cd=+($('botCooldown')?.value||2), rem=cd*60000-(Date.now()-lastTradeTime);
-  if(lastTradeTime&&rem>0)say('⏳ cooldown: '+Math.ceil(rem/1000)+'s left');else say('✓ no cooldown');
-  say('— scanning market…');
-  try{
-    await runScan();
-    const minStr=+($('botScore').value||0.25);
-    const dirs=lastScan.filter(c=>c.dir!=='—');
-    say('scan: '+lastScan.length+' coins ranked · '+dirs.length+' with direction · need strength ≥'+minStr);
-    for(const c of lastScan.slice(0,5)){
-      let verdict='';
-      if(c.dir==='—')verdict='no clear direction';
-      else if(c.strength<minStr)verdict='strength '+c.strength.toFixed(2)+' below '+minStr;
-      else if(recentCoins.includes(c.sym))verdict='recently traded — temporarily skipped';
-      else if($('fundFilter')?.checked && Math.abs((c.fr||0)*100)<+($('botMinFund')?.value||3))verdict='funding '+((c.fr||0)*100).toFixed(2)+'% below filter';
-      else verdict='✓ WOULD TRADE '+c.dir+' (strength '+c.strength.toFixed(2)+')';
-      say('  '+c.sym+': '+verdict);
+    if(op){
+      const nm=op.product_symbol||op.product_id;
+      if(robotOpenTrade && op.product_id===robotOpenTrade.prodId)say('⏳ In trade: '+nm+' '+(robotOpenTrade.side||'').toUpperCase()+' — waiting for SL/TP to close it. No new trade until then.');
+      else if(ENV!=='testnet')say('⛔ OPEN POSITION '+nm+' size '+op.size+' — on LIVE the robot never closes your positions. Close it on Delta to unblock.');
+      else say('🧹 leftover position '+nm+' size '+op.size+' — robot will close it on the next tick (demo), then trade.');
+      finish();return;
     }
-    if(!lastScan.length)say('  scan returned nothing — possible API issue');
+    say('✓ no open position blocking');
+  }catch(e){say('⚠ could not check positions: '+e.message);}
+  await refreshRobotBalance();
+  const mc=moneyCfg();
+  say('balance $'+availBalance.toFixed(2)+' available · money per trade $'+mc.money+' × '+mc.lev+'x = $'+(mc.money*mc.lev).toFixed(2)+' position');
+  if(!(mc.money>0)){say('❌ Money per trade is $0 — set it in Money Control.');finish();return;}
+  if(mc.money>availBalance){say('❌ Money per trade is more than your available balance — robot will not trade.');finish();return;}
+  const lossLim=+$('dailyLimit')?.value||0;
+  if(lossLim>0){
+    try{
+      const dp=await refreshDayPnl(null,true);
+      if(dp<=-Math.abs(lossLim)){say('⛔ Daily loss limit HIT: today '+dp.toFixed(2)+' (limit -'+Math.abs(lossLim)+') — robot stops itself. Raise the limit or wait for tomorrow.');finish();return;}
+      say('✓ loss limit ok: today '+dp.toFixed(2)+' (limit -'+Math.abs(lossLim)+')');
+    }catch(e){say('❌ loss-limit check failed ('+e.message+') — robot skips entries until it works.');finish();return;}
+  }else say('⚠ no daily loss limit set — robot has no loss cap');
+  say('— scanning market (same rules as the robot)…');
+  try{
+    const tj=await pubGet('/v2/tickers','','live');
+    if(!tj.result){say('❌ scan failed - no ticker data. Robot skips this tick.');finish();return;}
+    const movers=rankMovers(tj.result);
+    say('scan: '+movers.length+' perpetuals ranked · need move ≥1%, tradeable on '+ENV+', not the last coin traded'+(recentCoins[0]?' ('+recentCoins[0]+')':''));
+    let pick=null;
+    for(const m of movers.slice(0,6)){
+      let verdict;
+      if(Math.abs(m.chg)<1)verdict='move '+m.chg.toFixed(2)+'% below 1%';
+      else if(m.sym===recentCoins[0])verdict='just traded — skipped this round';
+      else if(!products.some(p=>p.symbol===m.sym))verdict='not listed on '+ENV;
+      else if(computeContracts(products.find(p=>p.symbol===m.sym),m.mark)<1)verdict='1 lot is bigger than your $'+(mc.money*mc.lev).toFixed(2)+' position — skipped';
+      else{verdict='✓ WOULD TRADE';if(!pick)pick=m;}
+      say('  '+m.sym+' '+(m.chg>=0?'+':'')+m.chg.toFixed(2)+'% · funding '+m.fundPct.toFixed(2)+'%: '+verdict);
+    }
+    if(!pick)pick=movers.find(m=>Math.abs(m.chg)>=1&&m.sym!==recentCoins[0]&&products.some(p=>p.symbol===m.sym)&&computeContracts(products.find(p=>p.symbol===m.sym),m.mark)>=1);
+    if(!pick){say('⛔ No coin qualifies right now — robot will keep scanning every 20s. Quiet market, not a fault.');finish();return;}
+    const dir=pick.fundPct>=2?'SHORT (funding fade)':pick.fundPct<=-2?'LONG (funding fade)':(pick.chg>0?'LONG':'SHORT')+' (momentum)';
+    const prod=products.find(p=>p.symbol===pick.sym);
+    const lots=computeContracts(prod,pick.mark);
+    say('➡ next entry would be '+pick.sym+' '+dir+', '+lots+' lots ≈ $'+(lots*pick.mark*(+prod.contract_value||1)).toFixed(2)+' position');
   }catch(e){say('❌ scan failed: '+e.message);}
   finish();
   function finish(){
     log(out.join('\n'));
-    const rd=$('rsDetail');if(rd)rd.innerHTML=out.map(s=>s.replace(/</g,'&lt;')).join('<br>');
+    if(wo)wo.innerHTML=out.map(s=>s.replace(/</g,'&lt;')).join('<br>');
   }
 }
 window.whyNoTrades=whyNoTrades;
 
 /* SIMPLE MODE - clean rebuild, zero gates: scan live, top mover, 1 trade, SL/TP, loud logs */
+// perpetuals ranked by 24h move + funding pressure (strongest first)
+function rankMovers(tickers){
+  return (tickers||[])
+    .filter(t=>(t.contract_type==='perpetual_futures'||String(t.symbol||'').endsWith('USD'))&&+t.mark_price>0&&+t.open>0)
+    .map(t=>{
+      const chg=((+t.mark_price-+t.open)/+t.open*100);
+      const fundPct=(+t.funding_rate||0)*100;
+      const score=Math.abs(chg)+Math.min(Math.abs(fundPct),10)*0.8;
+      return {sym:t.symbol,mark:+t.mark_price,chg,fundPct,score};
+    })
+    .filter(m=>isFinite(m.chg))
+    .sort((a,b)=>b.score-a.score);
+}
 async function simpleTick(){
   if(!$('autoExec')?.checked) return;
   if(botBusy){return;}
@@ -1570,20 +1647,35 @@ async function simpleTick(){
       robotOpenTrade=null;saveRobotTrade();updateRobotStatus();
       if(pid)cleanupStops(pid);
     }
+    // DAILY LOSS LIMIT: checked before every new entry; hitting it switches the robot off
+    const lossLim=+$('dailyLimit')?.value||0;
+    if(lossLim>0){
+      let dayPnl;
+      try{dayPnl=await refreshDayPnl(pj.result,true);}
+      catch(e){log('x loss-limit check failed ('+e.message+') - skipping entry, will retry');botBusy=false;return;}
+      if(dayPnl<=-Math.abs(lossLim)){
+        log('🛑 DAILY LOSS LIMIT HIT: today '+dayPnl.toFixed(2)+' (limit -'+Math.abs(lossLim)+') - robot switched OFF');
+        const mm=$('masterMsg'); if(mm)mm.innerHTML='<span class="r">🛑 Robot stopped: daily loss limit hit (today '+dayPnl.toFixed(2)+'). Turning it back on stops again until tomorrow or a higher limit.</span>';
+        botBusy=false;
+        setMasterState(false);
+        return;
+      }
+    }
     const tj=await pubGet('/v2/tickers','','live');
     if(!tj.result){log('x scan failed - no ticker data');botBusy=false;return;}
-    const movers=(tj.result||[])
-      .filter(t=>(t.contract_type==='perpetual_futures'||String(t.symbol||'').endsWith('USD'))&&+t.mark_price>0&&+t.open>0)
-      .map(t=>{
-        const chg=((+t.mark_price-+t.open)/+t.open*100);
-        const fundPct=(+t.funding_rate||0)*100;
-        const score=Math.abs(chg)+Math.min(Math.abs(fundPct),10)*0.8;
-        return {sym:t.symbol,mark:+t.mark_price,chg,fundPct,score};
-      })
-      .filter(m=>isFinite(m.chg))
-      .sort((a,b)=>b.score-a.score);
-    const pick=movers.find(m=>Math.abs(m.chg)>=1 && m.sym!==recentCoins[0] && products.some(p=>p.symbol===m.sym));
-    if(!pick){log('... no mover >=1% tradeable here (top: '+(movers[0]?movers[0].sym+' '+movers[0].chg.toFixed(1)+'%':'none')+')');botBusy=false;return;}
+    // MONEY CONTROL: fresh real balance, never spend more than you set
+    await refreshRobotBalance();
+    const mc=moneyCfg();
+    if(!(mc.money>0)){log('x Money per trade is $0 - set it in Money Control');botBusy=false;return;}
+    if(mc.money>availBalance){log('x Money per trade $'+mc.money+' > available balance $'+availBalance.toFixed(2)+' - not trading');botBusy=false;return;}
+    const movers=rankMovers(tj.result);
+    const tradeable=movers.filter(m=>Math.abs(m.chg)>=1 && m.sym!==recentCoins[0] && products.some(p=>p.symbol===m.sym));
+    const pick=tradeable.find(m=>computeContracts(products.find(p=>p.symbol===m.sym),m.mark)>=1);
+    if(!pick){
+      if(tradeable.length)log('... '+tradeable.length+' mover(s) found but 1 lot of each is bigger than your $'+(mc.money*mc.lev).toFixed(2)+' position (money x leverage) - skipped');
+      else log('... no mover >=1% tradeable here (top: '+(movers[0]?movers[0].sym+' '+movers[0].chg.toFixed(1)+'%':'none')+')');
+      botBusy=false;return;
+    }
     let dir, why;
     if(pick.fundPct>=2){dir='sell';why='funding +'+pick.fundPct.toFixed(1)+'% = crowded longs -> fade SHORT';}
     else if(pick.fundPct<=-2){dir='buy';why='funding '+pick.fundPct.toFixed(1)+'% = crowded shorts -> fade LONG';}
@@ -1592,14 +1684,16 @@ async function simpleTick(){
     log('pick: '+pick.sym+' '+pick.chg.toFixed(1)+'% -> '+dir.toUpperCase()+' | '+why);
     const botLev=parseInt($('botLev')?.value)||2;
     const lr=await proxy('POST','/v2/products/'+prod.id+'/orders/leverage',{body:{leverage:String(botLev)}}).catch(e=>({success:false,error:e.message}));
-    if(lr.success===false)log('! leverage set note: '+JSON.stringify(lr.error)+' (wanted '+botLev+'x)');
+    if(lr.success===false){
+      if(ENV!=='testnet'){log('x could not set leverage to '+botLev+'x ('+JSON.stringify(lr.error)+') - trade skipped on LIVE');botBusy=false;return;}
+      log('! leverage set note: '+JSON.stringify(lr.error)+' (wanted '+botLev+'x)');
+    }
     else log('leverage set to '+botLev+'x');
-    let lots=computeContracts(prod, pick.mark||1);
-    const maxLots=parseInt($('botMaxLots')?.value)||50;
-    lots=Math.max(1, Math.min(lots, maxLots));
+    const lots=computeContracts(prod, pick.mark);
+    const maxLots=mc.maxLots;
     const jr=await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:lots,side:dir,order_type:'market_order'}});
     if(jr.success===false){log('x entry rejected: '+JSON.stringify(jr.error));recentCoins=[pick.sym];botBusy=false;return;}
-    log('entered '+dir.toUpperCase()+' '+lots+' lots '+pick.sym+' (balance-based, cap '+maxLots+')');
+    log('entered '+dir.toUpperCase()+' '+lots+' lots '+pick.sym+' ≈ $'+(lots*pick.mark*(+prod.contract_value||1)).toFixed(2)+' position ($'+mc.money+' x '+botLev+'x, cap '+maxLots+' lots)');
     let pos=null;
     for(let i=0;i<6&&!pos;i++){
       await new Promise(r=>setTimeout(r,1200));
@@ -1666,250 +1760,6 @@ function startRobotLoop(){
 }
 function stopRobotLoop(){ clearInterval(robotLoopTimer); robotLoopTimer=null; }
 
-async function robotTick(){
-  if(!$('autoExec')?.checked || !$('sigOn')?.checked) return;
-  if(botBusy) return;
-  // TESTNET AUTO-UNBLOCK: an adopted (reconnected) leftover demo position can block forever
-  // if it has no SL/TP. On demo, just close it and move on — it's paper money.
-  if(robotOpenTrade && ENV==='testnet' && robotOpenTrade.reconnected){
-    botBusy=true;
-    try{
-      const prodId=robotOpenTrade.prodId;
-      const closeSide=robotOpenTrade.side==='buy'?'sell':'buy';
-      log('🧹 demo cleanup: closing leftover position '+robotOpenTrade.sym+' that was blocking the robot');
-      await proxy('POST','/v2/orders',{body:{product_id:prodId,size:robotOpenTrade.size,side:closeSide,order_type:'market_order',reduce_only:true}}).catch(()=>{});
-      if(prodId)await cleanupStops(prodId);
-      robotOpenTrade=null;saveRobotTrade();updateRobotStatus();
-    }catch(e){log('   cleanup error: '+e.message);}
-    botBusy=false;
-    return; // next tick trades fresh
-  }
-  if(robotOpenTrade) return;   // one position at a time (robot's own trade)
-  if(typeof guardBlocks==='function' && guardBlocks()){
-    log('🛑 daily loss limit hit — robot paused, no new entries');
-    return;
-  }
-  // MAX TRADES/DAY cap — protects against fee bleed from over-trading
-  const today=new Date().toDateString();
-  let tc={d:today,n:0};
-  try{tc=JSON.parse(localStorage.getItem('dx_tradeCount')||'{}');if(tc.d!==today)tc={d:today,n:0};}catch(e){tc={d:today,n:0};}
-  const maxT=+($('botMaxTrades')?.value||10);
-  if(tc.n>=maxT){
-    const rd=$('rsDetail'); if(rd)rd.innerHTML='<b>Daily trade cap reached</b> ('+tc.n+'/'+maxT+'). Resumes tomorrow — protects you from fee bleed.';
-    return;
-  }
-
-  // COOLDOWN: don't fire again too soon after last trade (anti over-trading / fee bleed)
-  const cooldownMin=+($('botCooldown')?.value||3);
-  if(Date.now()-lastTradeTime < cooldownMin*60000){
-    const wait=Math.ceil((cooldownMin*60000-(Date.now()-lastTradeTime))/1000);
-    const st=$('rsDetail'); // soft note, don't spam log
-    return;
-  }
-  botBusy=true;
-  try{
-    await runScan();
-    const minStr=+($('botScore').value||0.30);
-    // count how many coins pass each gate — so waiting is explainable
-    const directional=lastScan.filter(c=>c.dir!=='—');
-    const strongEnough=directional.filter(c=>c.strength>=minStr);
-    const notRecent=strongEnough.filter(c=>!recentCoins.includes(c.sym));
-    // FUNDING FILTER (data-backed): journal showed high-funding coins are the only profitable group
-    // (>3% funding: 70% wins, +1.58% net; low funding: net loss). Trade only where the edge is.
-    const minFund=+($('botMinFund')?.value||3);
-    const fundOn=$('fundFilter')?.checked;
-    const fundOk = fundOn ? notRecent.filter(c=>Math.abs((c.fr||0)*100)>=minFund) : notRecent;
-    // pick the strongest candidate that is actually tradeable on the CURRENT env
-    // (scan uses live data; testnet may not list every coin)
-    const pick=fundOk.find(c=>products.some(p=>p.symbol===c.sym));
-    if(!pick){
-      const best=directional[0];
-      let why='';
-      if(!directional.length) why='no coin has a clear direction right now';
-      else if(!strongEnough.length) why=`${directional.length} coins have direction but none reach strength ${minStr} (best: ${best.sym} ${best.strength.toFixed(2)})`;
-      else if(!notRecent.length) why=`${strongEnough.length} qualify but all recently traded (${recentCoins.join(', ')})`;
-      else if(fundOk.length) why=`${fundOk.length} qualify but none is listed on ${ENV.toUpperCase()} — candidates: ${fundOk.slice(0,3).map(c=>c.sym).join(', ')}`;
-      else why=`${notRecent.length} qualify but none has funding ≥${minFund}% (edge zone). Best funding: ${(Math.max(...notRecent.map(c=>Math.abs((c.fr||0)*100)))).toFixed(2)}%`;
-      log('🤖 waiting — '+why);
-      const rd=$('rsDetail'); if(rd && $('autoExec')?.checked)rd.innerHTML='<b>Scanning…</b> '+why;
-      botBusy=false;return;
-    }
-    if(fundOn)log(`🤖 ${pick.sym} funding ${((pick.fr||0)*100).toFixed(2)}% — in the edge zone ✓`);
-
-    // 3. verify no open position anywhere (true one-at-a-time)
-    const pj=await proxy('GET','/v2/positions/margined');
-    const openPos=(pj.result||[]).find(p=>+p.size!==0);
-    if(openPos){
-      const nm=openPos.product_symbol||('id '+openPos.product_id);
-      if(ENV==='testnet'){
-        log('🧹 demo cleanup: closing blocking position '+nm+' (size '+openPos.size+')');
-        const cs=+openPos.size>0?'sell':'buy';  // best-effort; wrong side gets rejected harmlessly (reduce-only)
-        await proxy('POST','/v2/orders',{body:{product_id:openPos.product_id,size:Math.abs(+openPos.size),side:cs,order_type:'market_order',reduce_only:true}}).catch(()=>{});
-        await proxy('POST','/v2/orders',{body:{product_id:openPos.product_id,size:Math.abs(+openPos.size),side:(cs==='sell'?'buy':'sell'),order_type:'market_order',reduce_only:true}}).catch(()=>{});
-        if(openPos.product_id)await cleanupStops(openPos.product_id);
-        botBusy=false;return; // trade fresh next tick
-      }
-      log('🤖 blocked by open position: '+nm+' (size '+openPos.size+') — close it on Delta to let the robot trade');
-      const rd=$('rsDetail'); if(rd)rd.innerHTML='⛔ <b>Blocked by open position: '+nm+'</b> (size '+openPos.size+'). Robot trades one at a time — close it on Delta to unblock.';
-      botBusy=false;return;
-    }
-
-    // 3b. TREND FILTER — only trade WITH the multi-minute trend (if enabled)
-    if($('trendFilter')?.checked){
-      const tr=await getTrend(pick.sym);
-      const wantLong = pick.dir==='LONG';
-      const agrees = (wantLong && tr.dir!=='down') || (!wantLong && tr.dir!=='up');
-      if(!agrees){
-        log(`🤖 skipped ${pick.sym} ${pick.dir} — fights ${tr.dir}trend (trend ${tr.trend>=0?'+':''}${tr.trend}). Turn off Trend filter to allow it.`);
-        recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);  // skip it this round
-        botBusy=false;return;
-      }
-      log(`🤖 ${pick.sym} ${pick.dir} agrees with ${tr.dir}trend ✓`);
-    }
-
-    // 3c. ORDER-BOOK AGREEMENT (data-backed): in your journal, funding-zone trades where the
-    // book agreed with the direction won 80% (+2.70%); where it disagreed they won 40% (-1.12%).
-    if($('obFilter')?.checked!==false){
-      try{
-        const bj=await pubGet('/v2/l2orderbook/'+pick.sym,'','live');
-        const res=bj.result||{};
-        const sum=(arr)=> (arr||[]).slice(0,10).reduce((a,l)=>a+(+l.size||0),0);
-        const bidD=sum(res.buy), askD=sum(res.sell);
-        const imb=(bidD+askD)>0 ? bidD/(bidD+askD) : 0.5;
-        const bookAgrees = (pick.dir==='LONG' && imb>0.5) || (pick.dir==='SHORT' && imb<0.5);
-        if(!bookAgrees){
-          log(`🤖 skipped ${pick.sym} ${pick.dir} — order book disagrees (bid share ${(imb*100).toFixed(0)}%). This combo lost 60% of the time in your data.`);
-          recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);
-          botBusy=false;return;
-        }
-        log(`🤖 ${pick.sym} book agrees (bid share ${(imb*100).toFixed(0)}%) ✓ — this combo won 80% in your data`);
-      }catch(e){log('   book check failed ('+e.message+') — proceeding without it');}
-    }
-
-    // 4. find the product for this symbol and place the trade
-    const prod=products.find(p=>p.symbol===pick.sym);
-    if(!prod){log('🤖 product not found for '+pick.sym);botBusy=false;return;}
-    // load it into the UI too so the user sees what the robot is trading
-    selectSymbol(pick.sym);
-    // sync the manual side + buttons to the robot's direction so the SL/TP preview is correct
-    if(typeof setSide==='function')setSide(pick.dir==='LONG'?'buy':'sell');
-
-    const botSide = pick.dir==='LONG'?'buy':'sell';
-    const mark=pick.mark;
-    let size=computeContracts(prod, mark);
-    if(!size || size<1){
-      if(ENV==='testnet'){size=1;log('   size calc gave 0 (balance not loaded?) — demo fallback: 1 contract');}
-      else{log('🤖 size calc gave 0 — balance too small or not loaded. Increase balance % or check Connect.');botBusy=false;return;}
-    }
-    const slP=+$('botSL').value||0.5, tpP=+$('botTP').value||1.0;
-    const tick=prod.tick_size?+prod.tick_size:0.5;
-    const rnd=px=>(Math.round(px/tick)*tick).toFixed(String(tick).includes('.')?String(tick).split('.')[1].length:0);
-
-    const lev=parseInt($('botLev')?.value)||parseInt($('lev')?.value)||2;
-    await proxy('POST','/v2/products/'+prod.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
-
-    // ── STEP 1: plain market entry (no bracket — brackets fail silently) ──
-    const jr=await proxy('POST','/v2/orders',{body:{
-      product_id:prod.id, product_symbol:prod.symbol, size, side:botSide, order_type:'market_order'
-    }});
-    if(jr.success===false){log('🤖✗ '+pick.sym+' rejected: '+JSON.stringify(jr.error));botBusy=false;return;}
-
-    // ── STEP 2: read the ACTUAL position back from the exchange (source of truth) ──
-    let pos=null;
-    for(let i=0;i<6 && !pos;i++){
-      await new Promise(r=>setTimeout(r,1200));
-      try{
-        const pj2=await proxy('GET','/v2/positions/margined');
-        pos=(pj2.result||[]).find(p=>(p.product_id===prod.id||p.product_symbol===prod.symbol)&&+p.size!==0)||null;
-      }catch(e){}
-    }
-    if(!pos){log('🤖⚠ entry sent but no position visible after 7s — check Delta manually');botBusy=false;return;}
-
-    // Direction from REALITY: we know what we sent; the exchange confirms a position exists.
-    // Entry price from the exchange, not our estimate.
-    const realEntry=+pos.entry_price||mark;
-    const realSize=Math.abs(+pos.size);
-    const isBuy=botSide==='buy';
-    const sl=rnd(isBuy?realEntry*(1-slP/100):realEntry*(1+slP/100));
-    const tp=rnd(isBuy?realEntry*(1+tpP/100):realEntry*(1-tpP/100));
-    const closeSide=isBuy?'sell':'buy';
-
-    // ── STEP 3: protect it — reduce-only stop + take-profit from actual position ──
-    let slOk=false, slErr='';
-    for(let attempt=0; attempt<3 && !slOk; attempt++){
-      const r=await proxy('POST','/v2/orders',{body:{
-        product_id:prod.id, size:realSize, side:closeSide,
-        order_type:'market_order', stop_order_type:'stop_loss_order',
-        stop_price:String(sl), stop_trigger_method:'mark_price', reduce_only:true
-      }});
-      if(r.success!==false){slOk=true;}
-      else{slErr=JSON.stringify(r.error);await new Promise(x=>setTimeout(x,1000));}
-    }
-    if(!slOk){
-      // NEVER hold an unprotected position: close it immediately
-      log('🤖🛑 could not place stop-loss ('+slErr+') — CLOSING position immediately for safety');
-      await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:realSize,side:closeSide,order_type:'market_order',reduce_only:true}}).catch(()=>{});
-      botBusy=false;return;
-    }
-    // take-profit (best effort — stop is the critical one)
-    await proxy('POST','/v2/orders',{body:{
-      product_id:prod.id, size:realSize, side:closeSide,
-      order_type:'limit_order', limit_price:String(tp), reduce_only:true
-    }}).catch(()=>{});
-
-    robotOpenTrade={side:botSide,entry:realEntry,size:realSize,sym:pick.sym,
-      prodId:prod.id, tick, slP, tpP,
-      curSL:+sl, curTP:+tp, steps:0, lastStepPrice:realEntry,
-      stepPct:(+$('trailStep')?.value||slP)};
-    saveRobotTrade();
-    lastTradeTime=Date.now();
-    try{const td=new Date().toDateString();let c=JSON.parse(localStorage.getItem('dx_tradeCount')||'{}');if(c.d!==td)c={d:td,n:0};c.n++;localStorage.setItem('dx_tradeCount',JSON.stringify(c));}catch(e){}
-    recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);
-    log(`🤖✓ ${botSide.toUpperCase()} ${realSize} ${pick.sym} @${fmt(realEntry,priceDp())} · 🛡 SL ${sl} confirmed · TP ${tp}  (strength ${(pick.strength*100).toFixed(0)})`);
-    updateRobotStatus();
-    loadPositions();
-  }catch(e){log('🤖 loop error: '+e.message);}
-  botBusy=false;
-}
-async function maybeAutoExecute(dir, score, mark){
-  const ae=$('autoExec');
-  if(!ae?.checked) return;
-  const minScore=+$('botScore').value||0.45;
-  if(Math.abs(score)<minScore){log(`   ·score ${score.toFixed(2)} < min ${minScore}, no trade`);return;}
-  if(botBusy)return;
-  botBusy=true;
-  try{
-    // ONE POSITION AT A TIME: check for any open position on this symbol
-    const pj=await proxy('GET','/v2/positions/margined');
-    const openHere=(pj.result||[]).some(p=>+p.size!==0 && (p.product_symbol===cur.symbol||p.product_id===cur.id));
-    if(openHere){log('   ·position already open, robot waits');botBusy=false;return;}
-
-    const botSide = dir==='LONG'?'buy':'sell';
-    const size=parseInt($('botSize').value)||1;
-    const slP=+$('botSL').value||0.5, tpP=+$('botTP').value||1.0;
-    const isBuy=botSide==='buy';
-    const sl=roundTick(isBuy?mark*(1-slP/100):mark*(1+slP/100));
-    const tp=roundTick(isBuy?mark*(1+tpP/100):mark*(1-tpP/100));
-    const body={
-      product_id:cur.id, product_symbol:cur.symbol, size, side:botSide, order_type:'market_order',
-      bracket_stop_loss_price:String(sl), bracket_stop_loss_limit_price:String(sl),
-      bracket_take_profit_price:String(tp), bracket_take_profit_limit_price:String(tp),
-      bracket_stop_trigger_method:'mark_price'
-    };
-    const lev=parseInt($('botLev')?.value)||parseInt($('lev')?.value)||2;
-    await proxy('POST','/v2/products/'+cur.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
-    const j=await proxy('POST','/v2/orders',{body});
-    if(j.success===false){log('   🤖✗ rejected: '+JSON.stringify(j.error));}
-    else{
-      robotOpenTrade={side:botSide,entry:mark,size};
-      saveRobotTrade();
-      log(`   🤖✓ ${botSide.toUpperCase()} ${size} @mkt  SL ${sl} TP ${tp}  id=${j.result?.id}`);
-      updateRobotStatus();
-      loadPositions();
-    }
-  }catch(e){log('   🤖 error: '+e.message);}
-  botBusy=false;
-}
 
 function exportJournal(){
   if(!journal.length){alert('Journal empty — turn the engine on and let it run.');return;}
@@ -1968,18 +1818,22 @@ $('autoExec')?.addEventListener('change',()=>{
       log(isLive?'🔴 auto-resumed on LIVE (from saved Start Robot)':'🤖 auto-resumed (testnet)');
       startRobotLoop();
     }else{
-      const mode=$('sizeMode').value, pct=$('botPct').value, minS=$('botScore').value;
-      const sizeDesc = mode==='pct' ? `${pct}% of balance (auto lots per coin)` : `${pct} fixed contracts`;
+      const mc=moneyCfg();
       const isLive = ENV!=='testnet';
       let ok;
       if(isLive){
         // MANDATORY: a daily loss limit must be set before live auto-trading
         if(!(+$('dailyLimit').value>0)){
-          alert('Set a Daily Loss Limit first (Risk Guard panel).\n\nThe robot will not trade real money without a hard loss cap. Example: 3 (stops after $3 of losses today).');
+          alert('Set Max loss per day first (Money Control panel).\n\nThe robot will not trade real money without a hard loss cap. Example: 3 (stops after $3 of losses today).');
           $('autoExec').checked=false; localStorage.setItem('dx_master','0');
           updateRobotStatus(); return;
         }
-        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('botSL').value}% / TP ${$('botTP').value}%\nDaily loss limit: ${$('dailyLimit').value}\nMax trades/day: ${$('botMaxTrades')?.value||10}\n\nOnce ON, it STAYS ON across refreshes until you turn it off.\n\nContinue?`);
+        if(!(mc.money>0) || !availBalance || mc.money>availBalance){
+          alert('Check Money per trade (Money Control panel).\n\nMoney per trade: $'+mc.money+'\nAvailable on Delta: '+(availBalance?'$'+availBalance.toFixed(2):'not loaded — connect the proxy')+'\n\nIt must be more than $0 and not more than your available balance.');
+          $('autoExec').checked=false; localStorage.setItem('dx_master','0');
+          updateRobotStatus(); return;
+        }
+        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nDelta balance: $${availBalance.toFixed(2)} available\nMoney per trade: $${mc.money} × ${mc.lev}x leverage = $${(mc.money*mc.lev).toFixed(2)} position\nStop-loss ${mc.sl}% ≈ −$${(mc.money*mc.lev*(mc.sl/100+FEE_RT)).toFixed(2)} per losing trade\nTake-profit ${mc.tp}%\nMax loss per day: $${mc.dayMax} (robot switches off)\n\nOnce ON, it STAYS ON across refreshes until you turn it off.\n\nContinue?`);
         if(ok){
           const typed=prompt('Type  LIVE  (in capitals) to confirm real-money auto-trading:');
           if((typed||'').trim()!=='LIVE'){ok=false;}
@@ -1998,7 +1852,7 @@ $('autoExec')?.addEventListener('change',()=>{
   }
   updateRobotStatus();
 });
-['botPct','botScore','slPct','tpPct','lev','sizeMode','dailyLimit','botCooldown','trailStep','botSL','botTP','botMaxLots','botLev'].forEach(id=>{
+['botMoney','slPct','tpPct','lev','dailyLimit','botCooldown','trailStep','botSL','botTP','botMaxLots','botLev'].forEach(id=>{
   const el=$(id); if(!el)return;
   // restore saved value
   const saved=localStorage.getItem('dx_set_'+id);
@@ -2065,8 +1919,7 @@ function cancelResume(){
 }
 window.cancelResume=cancelResume;
 updateSizeCalc();
-$('sizeMode')?.addEventListener('change',()=>{localStorage.setItem('dx_set_sizeMode',$('sizeMode').value);updateSizeCalc();});
-$('botPct')?.addEventListener('input',()=>{localStorage.setItem('dx_set_botPct',$('botPct').value);updateSizeCalc();});
+refreshRobotBalance();   // real Delta balance for Money Control (shows a prompt if not connected)
 updateSizeCalc();
 ['botSize','botScore'].forEach(id=>$(id)?.addEventListener('input',updateRobotStatus));
 updateRobotStatus();

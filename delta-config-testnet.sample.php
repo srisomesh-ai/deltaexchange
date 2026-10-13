@@ -7,4 +7,4 @@
 $API_KEY        = 'your_TESTNET_api_key';
 $API_SECRET     = 'your_TESTNET_api_secret';
 $PROXY_TOKEN    = 'same_token_as_live_config';   // keep same so dashboard token works for both
-$ALLOWED_ORIGIN = '*';
+$ALLOWED_ORIGIN = '';                             // '' = only this site
