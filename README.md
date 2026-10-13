@@ -65,6 +65,8 @@ Turned on with the **Start Robot** toggle. Every 20 seconds it:
 
 Settings live in **Auto-Pilot Settings** (balance %, max lots, SL %, TP %, leverage, trail step).
 The dashboard defaults to **TESTNET**. Arming on LIVE requires a confirmation and typing `LIVE`.
+**🔍 Why no trades?** (under the robot status) runs every check the robot makes, without placing
+an order, and shows which one is stopping it and which coin it would trade next.
 
 ## Security notes
 

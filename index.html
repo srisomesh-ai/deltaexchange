@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v61</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v62</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -255,7 +255,8 @@ if(sessionStorage.getItem('dx_auth')==='1'){
           <div id="robotStatus" class="robot-status">
             <div class="st" id="rsStateWrap"><span id="rsLight" style="width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block"></span><span id="rsState">Robot Off</span></div>
             <div class="dt" id="rsDetail">Turn on the engine, then auto-pilot to arm the robot.</div>
-            
+            <button onclick="whyNoTrades()" style="margin-top:9px;font-size:11px;padding:6px 12px">🔍 Why no trades?</button>
+            <div id="whyOut" style="display:none;margin-top:8px;font-size:11px;line-height:1.5"></div>
           </div>
           <div class="gauge">
             <div class="dir-big" id="sigDir" style="color:var(--muted)">NEUTRAL</div>
@@ -1467,57 +1468,81 @@ async function cleanupStops(prodId){
   }catch(e){}
 }
 
-// ── ONE-TAP DIAGNOSTIC: checks every gate and reports in plain words ──
+// ── ONE-TAP DIAGNOSTIC: checks every SIMPLE MODE gate and reports in plain words ──
+// Mirrors simpleTick step by step (same mover ranking via rankMovers) but never places an order.
 async function whyNoTrades(){
   const out=[];
   const say=s=>out.push(s);
-  say('═══ ROBOT DIAGNOSTIC ═══');
+  say('═══ ROBOT DIAGNOSTIC ('+ENV.toUpperCase()+') ═══');
+  // own output box: rsDetail is redrawn every 3s by updateRobotStatus and would wipe this
+  const wo=$('whyOut'); if(wo){wo.style.display='block';wo.innerHTML='🔍 checking…';}
   if(!PROXY){say('❌ Proxy not connected — set URL + token and Connect. Robot cannot do anything.');finish();return;}
-  say('✓ proxy set · env: '+ENV.toUpperCase());
+  say('✓ proxy set');
   if(!products.length){say('❌ No markets loaded — Connect may have failed. Check proxy URL.');finish();return;}
   say('✓ '+products.length+' markets loaded');
-  say(($('sigOn')?.checked?'✓ Engine ON':'❌ Engine OFF — flip Start Robot'));
-  say(($('autoExec')?.checked?'✓ Auto-Pilot ARMED':'❌ Auto-Pilot OFF — flip Start Robot and confirm the dialog'));
-  if(robotOpenTrade){say('⛔ Robot tracking open trade: '+robotOpenTrade.sym+' '+(robotOpenTrade.side||'').toUpperCase()+' — will not open another until it closes. If old/stuck, close it on Delta.');}
+  if(!$('autoExec')?.checked){say('❌ Robot OFF — flip Start Robot and confirm the dialog.');}
+  else say('✓ Robot armed');
+  if($('autoExec')?.checked && !robotLoopTimer)say('❌ Robot armed but its 20s loop is not running — flip Start Robot off and on.');
+  else if(robotLoopTimer)say('✓ loop running (every 20s)'+(botBusy?' · busy with a tick right now':''));
   try{
     const pj=await proxy('GET','/v2/positions/margined');
+    if(pj.success===false){say('❌ positions check failed: '+JSON.stringify(pj.error)+' — robot stops here every tick.');finish();return;}
     const op=(pj.result||[]).find(p=>+p.size!==0);
-    if(op)say('⛔ OPEN POSITION on account: '+(op.product_symbol||op.product_id)+' size '+op.size+' — THIS BLOCKS ALL NEW TRADES. Close it on Delta to unblock.');
-    else say('✓ no open position blocking');
-  }catch(e){say('⚠ could not check positions: '+e.message);}
-  if(typeof guardBlocks==='function'&&guardBlocks())say('⛔ Daily loss limit HIT ('+$('dailyLimit').value+') — no new entries today.');
-  else say('✓ loss guard ok (limit '+($('dailyLimit').value||'none')+', PnL '+($('todayPnl').value||0)+')');
-  try{const tc=JSON.parse(localStorage.getItem('dx_tradeCount')||'{}');const maxT=+($('botMaxTrades')?.value||15);
-    if(tc.d===new Date().toDateString()&&tc.n>=maxT)say('⛔ Daily trade cap reached ('+tc.n+'/'+maxT+').');
-    else say('✓ trade cap ok ('+((tc.d===new Date().toDateString()&&tc.n)||0)+'/'+maxT+')');}catch(e){}
-  const cd=+($('botCooldown')?.value||2), rem=cd*60000-(Date.now()-lastTradeTime);
-  if(lastTradeTime&&rem>0)say('⏳ cooldown: '+Math.ceil(rem/1000)+'s left');else say('✓ no cooldown');
-  say('— scanning market…');
-  try{
-    await runScan();
-    const minStr=+($('botScore').value||0.25);
-    const dirs=lastScan.filter(c=>c.dir!=='—');
-    say('scan: '+lastScan.length+' coins ranked · '+dirs.length+' with direction · need strength ≥'+minStr);
-    for(const c of lastScan.slice(0,5)){
-      let verdict='';
-      if(c.dir==='—')verdict='no clear direction';
-      else if(c.strength<minStr)verdict='strength '+c.strength.toFixed(2)+' below '+minStr;
-      else if(recentCoins.includes(c.sym))verdict='recently traded — temporarily skipped';
-      else if($('fundFilter')?.checked && Math.abs((c.fr||0)*100)<+($('botMinFund')?.value||3))verdict='funding '+((c.fr||0)*100).toFixed(2)+'% below filter';
-      else verdict='✓ WOULD TRADE '+c.dir+' (strength '+c.strength.toFixed(2)+')';
-      say('  '+c.sym+': '+verdict);
+    if(op){
+      const nm=op.product_symbol||op.product_id;
+      if(robotOpenTrade && op.product_id===robotOpenTrade.prodId)say('⏳ In trade: '+nm+' '+(robotOpenTrade.side||'').toUpperCase()+' — waiting for SL/TP to close it. No new trade until then.');
+      else if(ENV!=='testnet')say('⛔ OPEN POSITION '+nm+' size '+op.size+' — on LIVE the robot never closes your positions. Close it on Delta to unblock.');
+      else say('🧹 leftover position '+nm+' size '+op.size+' — robot will close it on the next tick (demo), then trade.');
+      finish();return;
     }
-    if(!lastScan.length)say('  scan returned nothing — possible API issue');
+    say('✓ no open position blocking');
+  }catch(e){say('⚠ could not check positions: '+e.message);}
+  availBalance?say('✓ balance '+availBalance.toFixed(2)):say('⚠ balance not loaded — lot size falls back to the 1-lot minimum');
+  if(guardBlocks())say('⚠ Daily loss limit HIT ('+$('dailyLimit').value+') — note: blocks manual orders, but SIMPLE MODE does not check it. Turn the robot off if you want to stop.');
+  say('— scanning market (same rules as the robot)…');
+  try{
+    const tj=await pubGet('/v2/tickers','','live');
+    if(!tj.result){say('❌ scan failed - no ticker data. Robot skips this tick.');finish();return;}
+    const movers=rankMovers(tj.result);
+    say('scan: '+movers.length+' perpetuals ranked · need move ≥1%, tradeable on '+ENV+', not the last coin traded'+(recentCoins[0]?' ('+recentCoins[0]+')':''));
+    let pick=null;
+    for(const m of movers.slice(0,6)){
+      let verdict;
+      if(Math.abs(m.chg)<1)verdict='move '+m.chg.toFixed(2)+'% below 1%';
+      else if(m.sym===recentCoins[0])verdict='just traded — skipped this round';
+      else if(!products.some(p=>p.symbol===m.sym))verdict='not listed on '+ENV;
+      else{verdict='✓ WOULD TRADE';if(!pick)pick=m;}
+      say('  '+m.sym+' '+(m.chg>=0?'+':'')+m.chg.toFixed(2)+'% · funding '+m.fundPct.toFixed(2)+'%: '+verdict);
+    }
+    if(!pick)pick=movers.find(m=>Math.abs(m.chg)>=1&&m.sym!==recentCoins[0]&&products.some(p=>p.symbol===m.sym));
+    if(!pick){say('⛔ No coin qualifies right now — robot will keep scanning every 20s. Quiet market, not a fault.');finish();return;}
+    const dir=pick.fundPct>=2?'SHORT (funding fade)':pick.fundPct<=-2?'LONG (funding fade)':(pick.chg>0?'LONG':'SHORT')+' (momentum)';
+    const prod=products.find(p=>p.symbol===pick.sym);
+    const lots=Math.max(1,Math.min(computeContracts(prod,pick.mark||1),parseInt($('botMaxLots')?.value)||50));
+    say('➡ next entry would be '+pick.sym+' '+dir+', '+lots+' lots');
   }catch(e){say('❌ scan failed: '+e.message);}
   finish();
   function finish(){
     log(out.join('\n'));
-    const rd=$('rsDetail');if(rd)rd.innerHTML=out.map(s=>s.replace(/</g,'&lt;')).join('<br>');
+    if(wo)wo.innerHTML=out.map(s=>s.replace(/</g,'&lt;')).join('<br>');
   }
 }
 window.whyNoTrades=whyNoTrades;
 
 /* SIMPLE MODE - clean rebuild, zero gates: scan live, top mover, 1 trade, SL/TP, loud logs */
+// perpetuals ranked by 24h move + funding pressure (strongest first)
+function rankMovers(tickers){
+  return (tickers||[])
+    .filter(t=>(t.contract_type==='perpetual_futures'||String(t.symbol||'').endsWith('USD'))&&+t.mark_price>0&&+t.open>0)
+    .map(t=>{
+      const chg=((+t.mark_price-+t.open)/+t.open*100);
+      const fundPct=(+t.funding_rate||0)*100;
+      const score=Math.abs(chg)+Math.min(Math.abs(fundPct),10)*0.8;
+      return {sym:t.symbol,mark:+t.mark_price,chg,fundPct,score};
+    })
+    .filter(m=>isFinite(m.chg))
+    .sort((a,b)=>b.score-a.score);
+}
 async function simpleTick(){
   if(!$('autoExec')?.checked) return;
   if(botBusy){return;}
@@ -1548,16 +1573,7 @@ async function simpleTick(){
     }
     const tj=await pubGet('/v2/tickers','','live');
     if(!tj.result){log('x scan failed - no ticker data');botBusy=false;return;}
-    const movers=(tj.result||[])
-      .filter(t=>(t.contract_type==='perpetual_futures'||String(t.symbol||'').endsWith('USD'))&&+t.mark_price>0&&+t.open>0)
-      .map(t=>{
-        const chg=((+t.mark_price-+t.open)/+t.open*100);
-        const fundPct=(+t.funding_rate||0)*100;
-        const score=Math.abs(chg)+Math.min(Math.abs(fundPct),10)*0.8;
-        return {sym:t.symbol,mark:+t.mark_price,chg,fundPct,score};
-      })
-      .filter(m=>isFinite(m.chg))
-      .sort((a,b)=>b.score-a.score);
+    const movers=rankMovers(tj.result);
     const pick=movers.find(m=>Math.abs(m.chg)>=1 && m.sym!==recentCoins[0] && products.some(p=>p.symbol===m.sym));
     if(!pick){log('... no mover >=1% tradeable here (top: '+(movers[0]?movers[0].sym+' '+movers[0].chg.toFixed(1)+'%':'none')+')');botBusy=false;return;}
     let dir, why;
