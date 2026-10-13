@@ -58,18 +58,31 @@ Turned on with the **Start Robot** toggle. Every 20 seconds it:
 3. Picks a direction: funding ≥ +2% → fade SHORT, funding ≤ −2% → fade LONG,
    otherwise follow momentum. (High-funding fades were the only profitable group in the
    trade journal.)
-4. Sets leverage, sizes the trade as `balance × % × leverage ÷ price` (capped by **Max lots**),
-   and enters with a market order.
+4. Sets your leverage (on LIVE, if Delta refuses it the trade is skipped), sizes the trade as
+   `money per trade × leverage ÷ price of 1 lot` (capped by **Max lots**), and enters with a
+   market order. Coins where even 1 lot is bigger than that are skipped — it never rounds up.
 5. Places a stop-loss and take-profit, then **verifies on the exchange** that the stop exists.
    If it can't be confirmed after one retry, the position is closed immediately.
 
-**Daily loss limit** (Risk Guard panel): before every new entry the robot checks today's PnL —
+**Money Control panel** (everything you control by hand):
+
+- **Delta balance** — your real available balance, read from Delta every 15s and before every trade.
+- **Money per trade ($)** — the margin each trade uses. The robot won't trade if it is $0 or more than
+  your available balance.
+- **Leverage (x)** — position size = money × leverage (e.g. $5 × 2x = $10 position).
+- **Stop-loss % / Take-profit %** — the panel shows what each one means in dollars, fees included (estimate).
+- **Max loss per day ($)** — required for LIVE; the robot switches itself off when today's loss reaches it.
+- **Max lots per trade** — extra cap on size.
+
+The LIVE confirmation shows your real balance and these numbers in dollars before you type `LIVE`.
+
+**Max loss per day** (Money Control panel): before every new entry the robot checks today's PnL —
 wallet balance + open-position PnL compared with the first reading of the day (closed trades and
 fees count). When the loss reaches the limit it switches itself **off** and blocks manual orders;
 an open trade keeps its SL/TP. If the check can't read your balance, the robot skips the entry
 rather than trading blind. Deposits/withdrawals during the day move the number too. Set it to 0 to disable.
 
-Settings live in **Auto-Pilot Settings** (balance %, max lots, SL %, TP %, leverage, trail step).
+Trail step % (profit-lock) is under **Advanced** in Money Control.
 The dashboard defaults to **TESTNET**. Arming on LIVE requires a confirmation and typing `LIVE`.
 **🔍 Why no trades?** (under the robot status) runs every check the robot makes, without placing
 an order, and shows which one is stopping it and which coin it would trade next.

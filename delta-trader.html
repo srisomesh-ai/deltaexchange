@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v63</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v64</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -288,22 +288,34 @@ if(sessionStorage.getItem('dx_auth')==='1'){
       </div>
 
       <div class="card">
-        <div class="card-h"><span class="l"><span class="mk"></span>Auto-Pilot Settings</span></div>
+        <div class="card-h"><span class="l"><span class="mk"></span>Money Control</span></div>
         <div class="card-b">
+          <!-- real balance straight from Delta (robot panel's own fetch, every 15s) -->
+          <div style="background:var(--navy);border-radius:9px;padding:12px 14px;margin-bottom:12px;color:#fff">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:#b9c4d6;letter-spacing:.3px">DELTA BALANCE <span id="robotBalEnv"></span></span>
+              <button onclick="refreshRobotBalance()" style="font-size:10px;padding:3px 9px;background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.2)">↻</button>
+            </div>
+            <div id="robotBal" class="num" style="font-size:22px;font-weight:700;margin-top:2px">—</div>
+            <div id="robotBalSub" class="num" style="font-size:11px;color:#b9c4d6">Connect the proxy to load your real balance.</div>
+          </div>
           <div class="row2">
-            <div class="fld"><label>Balance % per trade</label><input id="botPct" type="number" step="1" value="10"></div>
+            <div class="fld"><label>Money per trade ($)</label><input id="botMoney" type="number" step="any" min="0" value="5"></div>
+            <div class="fld"><label>Leverage (x)</label><input id="botLev" type="number" step="1" value="2" min="1" max="25"></div>
+          </div>
+          <div class="row2">
+            <div class="fld"><label>Stop-loss %</label><input id="botSL" type="number" step="0.1" value="0.5"></div>
+            <div class="fld"><label>Take-profit %</label><input id="botTP" type="number" step="0.1" value="1.0"></div>
+          </div>
+          <div class="row2">
+            <div class="fld"><label>Max loss per day ($)</label><input id="dailyLimit" type="number" step="any" value="3" placeholder="3"></div>
             <div class="fld"><label>Max lots per trade</label><input id="botMaxLots" type="number" step="1" value="50"></div>
           </div>
-          <div class="row2">
-            <div class="fld"><label>Robot stop-loss %</label><input id="botSL" type="number" step="0.1" value="0.5"></div>
-            <div class="fld"><label>Robot take-profit %</label><input id="botTP" type="number" step="0.1" value="1.0"></div>
-          </div>
-          <div class="fld"><label>Robot leverage (low = safer)</label><input id="botLev" type="number" step="1" value="2" min="1" max="25"></div>
-          <div class="fld"><label>Trail step % (profit-lock)</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
-          <div id="sizeCalc" class="num" style="font-size:10px;color:var(--muted);margin-bottom:4px"></div>
-          <div style="font-size:10px;color:var(--muted)">Lots = balance × % × leverage ÷ coin price, capped by Max lots. That is all the robot uses.</div>
-          <input id="botSize" type="hidden" value="1"><input id="sizeMode" type="hidden" value="pct">
-          <span id="sizeLbl" class="hidden"></span>
+          <div id="sizeCalc" class="num" style="font-size:11px;line-height:1.55;background:#f8fafc;border:1px solid var(--line);border-radius:7px;padding:9px 11px;margin-bottom:8px"></div>
+          <details><summary style="cursor:pointer;font-size:11px;color:var(--muted);font-weight:600">Advanced</summary>
+            <div class="fld" style="margin-top:8px"><label>Trail step % (profit-lock)</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
+          </details>
+          <input id="botSize" type="hidden" value="1">
         </div>
       </div>
 
@@ -360,16 +372,15 @@ if(sessionStorage.getItem('dx_auth')==='1'){
         <div class="card-h"><span class="l"><span class="mk"></span>Risk Guard</span></div>
         <div class="card-b">
           <div class="row2">
-            <div class="fld"><label>Daily loss limit</label><input id="dailyLimit" type="number" step="any" value="3" placeholder="3"></div>
             <div class="fld"><label>Today's PnL</label><input id="todayPnl" type="number" step="any" value="0" readonly style="background:#eef1f5"></div>
           </div>
-          <div id="guardMsg" style="font-size:11px;color:var(--muted)">Stops the robot and blocks new entries once today's loss reaches the limit. Open positions keep their SL/TP.</div>
+          <div id="guardMsg" style="font-size:11px;color:var(--muted)">Stops the robot and blocks new entries once today's loss reaches <b>Max loss per day</b> (set in Money Control). Open positions keep their SL/TP.</div>
         </div>
       </div>
 
       <div class="card">
         <div class="card-h"><span class="l"><span class="mk"></span>Account</span>
-          <span class="dim" style="font-weight:400;font-size:10px;display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span>live</span></div>
+          <span class="dim" style="font-weight:400;font-size:10px;display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span>auto-refresh</span></div>
         <div class="card-b">
           <div class="tabs">
             <button class="act" onclick="posTab('pos',this)">Positions</button>
@@ -638,7 +649,7 @@ function setEnv(e){
   ENV=e; localStorage.setItem('dx_env',e);
   refreshEnvUI();
   if(typeof updateRobotStatus==='function')updateRobotStatus();
-  loadProducts(); loadBalance();
+  loadProducts(); loadBalance(); availBalance=0; refreshRobotBalance();
   log('switched to '+e.toUpperCase()+(e==='testnet'?' — 📡 signals from LIVE market data, orders on DEMO':''));
 }
 function refreshEnvUI(){
@@ -670,7 +681,7 @@ function saveCfg(){
   loadProducts().then(()=>{
     $('cfgMsg').textContent = products.length ? ('✓ '+products.length+' markets loaded') : '✗ no data — check URL';
   });
-  loadBalance();
+  loadBalance(); refreshRobotBalance();
   // pull any settings saved from another device, then restore log
   cloudLoad().then(loaded=>{
     if(loaded){try{const h=localStorage.getItem('dx_log');if(h)$('autolog').textContent=h;}catch(e){}
@@ -1404,29 +1415,56 @@ function renderStats(){
     <div class="kv"><span class="lbl">Net after fees</span><span class="v" style="color:${netCol};font-size:15px">${net>=0?'+':''}${net.toFixed(2)}</span></div>`;
 }
 
-// compute how many contracts a %-of-balance works out to for a given coin
+/* ===== MONEY CONTROL: you set $ per trade, leverage, SL and max daily loss ===== */
+const FEE_RT=0.0012;   // ≈ round-trip taker fee (0.05%/side + 18% GST), estimate only
+function moneyCfg(){
+  return {money:+$('botMoney')?.value||0, lev:Math.max(1,parseInt($('botLev')?.value)||1),
+          sl:+$('botSL')?.value||0.5, tp:+$('botTP')?.value||1, dayMax:+$('dailyLimit')?.value||0,
+          maxLots:parseInt($('botMaxLots')?.value)||50};
+}
+// lots that fit inside (money × leverage) for this coin. 0 = one lot is bigger than your budget → coin skipped.
 function computeContracts(prod, price){
-  const mode=$('sizeMode')?.value||'pct';
-  if(mode==='fixed') return parseInt($('botPct').value)||1;   // reuse field as fixed count in fixed mode
-  const pct=(+$('botPct').value||10)/100;
-  const lev=parseInt($('botLev')?.value)||parseInt($('lev')?.value)||2;
-  const cv=prod.contract_value?+prod.contract_value:1;   // underlying per contract
-  // notional we want to control = balance * pct * leverage
-  const notional=availBalance*pct*lev;
-  const perContract=price*cv;                            // USD value of 1 contract
-  if(perContract<=0) return 1;
-  return Math.max(1, Math.floor(notional/perContract));
+  const c=moneyCfg();
+  const perContract=price*(prod.contract_value?+prod.contract_value:1);   // USD value of 1 lot
+  if(!(perContract>0)||!(c.money>0)) return 0;
+  return Math.min(Math.floor(c.money*c.lev/perContract), c.maxLots);
 }
 function updateSizeCalc(){
   const el=$('sizeCalc'); if(!el)return;
-  const mode=$('sizeMode')?.value||'pct';
-  if(mode==='fixed'){el.textContent='Fixed '+($('botPct').value||1)+' contracts per trade (same count every coin).';
-    if($('sizeLbl'))$('sizeLbl').textContent='Fixed contracts';return;}
-  if($('sizeLbl'))$('sizeLbl').textContent='Balance % per trade';
-  if(!availBalance){el.textContent='Connect + load balance to see auto lot size.';return;}
-  const pct=+$('botPct').value||10, lev=parseInt($('lev').value)||10;
-  el.innerHTML=`Using <b>${pct}%</b> of ${fmt(availBalance,2)} × ${lev}x = ${fmt(availBalance*pct/100*lev,2)} notional. Robot converts this to the right lots for each coin it picks.`;
+  const c=moneyCfg(), pos=c.money*c.lev;
+  const slLoss=pos*c.sl/100, tpWin=pos*c.tp/100, fee=pos*FEE_RT;
+  let warn='';
+  if(!(c.money>0))warn='<div class="r">⚠ Set Money per trade — robot will not trade with $0.</div>';
+  else if(availBalance && c.money>availBalance)warn='<div class="r">⚠ Money per trade ($'+fmt(c.money,2)+') is more than your available balance ($'+fmt(availBalance,2)+') — robot will not trade.</div>';
+  if(!(c.dayMax>0))warn+='<div class="r">⚠ No max loss per day set — LIVE arming is refused.</div>';
+  el.innerHTML=`Each trade: <b>$${fmt(c.money,2)}</b> × <b>${c.lev}x</b> = <b>$${fmt(pos,2)}</b> position<br>`+
+    `Stop-loss hit ≈ <b class="r">−$${fmt(slLoss+fee,2)}</b> · take-profit ≈ <b class="g">+$${fmt(tpWin-fee,2)}</b> <span class="dim">(incl. ≈$${fmt(fee,2)} fees)</span><br>`+
+    `Robot switches itself OFF after losing <b>$${fmt(c.dayMax,2)}</b> today. Coins where 1 lot is bigger than $${fmt(pos,2)} are skipped.`+warn;
 }
+// real balance from Delta for the robot panel (does not touch the Account tab)
+async function refreshRobotBalance(){
+  const big=$('robotBal'), sub=$('robotBalSub'), envEl=$('robotBalEnv');
+  if(envEl)envEl.innerHTML=ENV==='live'?'<span style="color:#ff8a8a">● LIVE</span>':'<span style="color:#7ee2a8">● TESTNET</span>';
+  if(!PROXY){if(sub)sub.textContent='Connect the proxy to load your real balance.';return;}
+  try{
+    const j=await proxy('GET','/v2/wallet/balances');
+    if(j.success===false)throw new Error(JSON.stringify(j.error));
+    const all=j.result||[];
+    const symOf=b=>b.asset_symbol||b.asset?.symbol||b.symbol||'';
+    const settle=all.find(b=>/USD/i.test(symOf(b)))||all[0];
+    if(!settle)throw new Error('no balance returned');
+    const wallet=+(settle.balance ?? settle.wallet_balance ?? settle.available_balance ?? 0);
+    availBalance=+(settle.available_balance ?? settle.balance ?? 0);
+    walletCache={t:Date.now(),bal:wallet};
+    if(big)big.textContent='$'+fmt(availBalance,2)+' available';
+    if(sub)sub.textContent=symOf(settle)+' wallet $'+fmt(wallet,2)+' · updated '+new Date().toLocaleTimeString();
+  }catch(e){
+    if(big)big.textContent='—';
+    if(sub)sub.textContent='⚠ could not load balance: '+e.message;
+  }
+  updateSizeCalc();
+}
+setInterval(()=>{if(PROXY)refreshRobotBalance();},15000);
 
 // ===== SCANNER-DRIVEN ROBOT: auto-picks best coin from scan, trades it =====
 // ── SAFETY NET: make sure an open position always has a stop-loss ──
@@ -1523,7 +1561,11 @@ async function whyNoTrades(){
     }
     say('✓ no open position blocking');
   }catch(e){say('⚠ could not check positions: '+e.message);}
-  availBalance?say('✓ balance '+availBalance.toFixed(2)):say('⚠ balance not loaded — lot size falls back to the 1-lot minimum');
+  await refreshRobotBalance();
+  const mc=moneyCfg();
+  say('balance $'+availBalance.toFixed(2)+' available · money per trade $'+mc.money+' × '+mc.lev+'x = $'+(mc.money*mc.lev).toFixed(2)+' position');
+  if(!(mc.money>0)){say('❌ Money per trade is $0 — set it in Money Control.');finish();return;}
+  if(mc.money>availBalance){say('❌ Money per trade is more than your available balance — robot will not trade.');finish();return;}
   const lossLim=+$('dailyLimit')?.value||0;
   if(lossLim>0){
     try{
@@ -1544,15 +1586,16 @@ async function whyNoTrades(){
       if(Math.abs(m.chg)<1)verdict='move '+m.chg.toFixed(2)+'% below 1%';
       else if(m.sym===recentCoins[0])verdict='just traded — skipped this round';
       else if(!products.some(p=>p.symbol===m.sym))verdict='not listed on '+ENV;
+      else if(computeContracts(products.find(p=>p.symbol===m.sym),m.mark)<1)verdict='1 lot is bigger than your $'+(mc.money*mc.lev).toFixed(2)+' position — skipped';
       else{verdict='✓ WOULD TRADE';if(!pick)pick=m;}
       say('  '+m.sym+' '+(m.chg>=0?'+':'')+m.chg.toFixed(2)+'% · funding '+m.fundPct.toFixed(2)+'%: '+verdict);
     }
-    if(!pick)pick=movers.find(m=>Math.abs(m.chg)>=1&&m.sym!==recentCoins[0]&&products.some(p=>p.symbol===m.sym));
+    if(!pick)pick=movers.find(m=>Math.abs(m.chg)>=1&&m.sym!==recentCoins[0]&&products.some(p=>p.symbol===m.sym)&&computeContracts(products.find(p=>p.symbol===m.sym),m.mark)>=1);
     if(!pick){say('⛔ No coin qualifies right now — robot will keep scanning every 20s. Quiet market, not a fault.');finish();return;}
     const dir=pick.fundPct>=2?'SHORT (funding fade)':pick.fundPct<=-2?'LONG (funding fade)':(pick.chg>0?'LONG':'SHORT')+' (momentum)';
     const prod=products.find(p=>p.symbol===pick.sym);
-    const lots=Math.max(1,Math.min(computeContracts(prod,pick.mark||1),parseInt($('botMaxLots')?.value)||50));
-    say('➡ next entry would be '+pick.sym+' '+dir+', '+lots+' lots');
+    const lots=computeContracts(prod,pick.mark);
+    say('➡ next entry would be '+pick.sym+' '+dir+', '+lots+' lots ≈ $'+(lots*pick.mark*(+prod.contract_value||1)).toFixed(2)+' position');
   }catch(e){say('❌ scan failed: '+e.message);}
   finish();
   function finish(){
@@ -1620,9 +1663,19 @@ async function simpleTick(){
     }
     const tj=await pubGet('/v2/tickers','','live');
     if(!tj.result){log('x scan failed - no ticker data');botBusy=false;return;}
+    // MONEY CONTROL: fresh real balance, never spend more than you set
+    await refreshRobotBalance();
+    const mc=moneyCfg();
+    if(!(mc.money>0)){log('x Money per trade is $0 - set it in Money Control');botBusy=false;return;}
+    if(mc.money>availBalance){log('x Money per trade $'+mc.money+' > available balance $'+availBalance.toFixed(2)+' - not trading');botBusy=false;return;}
     const movers=rankMovers(tj.result);
-    const pick=movers.find(m=>Math.abs(m.chg)>=1 && m.sym!==recentCoins[0] && products.some(p=>p.symbol===m.sym));
-    if(!pick){log('... no mover >=1% tradeable here (top: '+(movers[0]?movers[0].sym+' '+movers[0].chg.toFixed(1)+'%':'none')+')');botBusy=false;return;}
+    const tradeable=movers.filter(m=>Math.abs(m.chg)>=1 && m.sym!==recentCoins[0] && products.some(p=>p.symbol===m.sym));
+    const pick=tradeable.find(m=>computeContracts(products.find(p=>p.symbol===m.sym),m.mark)>=1);
+    if(!pick){
+      if(tradeable.length)log('... '+tradeable.length+' mover(s) found but 1 lot of each is bigger than your $'+(mc.money*mc.lev).toFixed(2)+' position (money x leverage) - skipped');
+      else log('... no mover >=1% tradeable here (top: '+(movers[0]?movers[0].sym+' '+movers[0].chg.toFixed(1)+'%':'none')+')');
+      botBusy=false;return;
+    }
     let dir, why;
     if(pick.fundPct>=2){dir='sell';why='funding +'+pick.fundPct.toFixed(1)+'% = crowded longs -> fade SHORT';}
     else if(pick.fundPct<=-2){dir='buy';why='funding '+pick.fundPct.toFixed(1)+'% = crowded shorts -> fade LONG';}
@@ -1631,14 +1684,16 @@ async function simpleTick(){
     log('pick: '+pick.sym+' '+pick.chg.toFixed(1)+'% -> '+dir.toUpperCase()+' | '+why);
     const botLev=parseInt($('botLev')?.value)||2;
     const lr=await proxy('POST','/v2/products/'+prod.id+'/orders/leverage',{body:{leverage:String(botLev)}}).catch(e=>({success:false,error:e.message}));
-    if(lr.success===false)log('! leverage set note: '+JSON.stringify(lr.error)+' (wanted '+botLev+'x)');
+    if(lr.success===false){
+      if(ENV!=='testnet'){log('x could not set leverage to '+botLev+'x ('+JSON.stringify(lr.error)+') - trade skipped on LIVE');botBusy=false;return;}
+      log('! leverage set note: '+JSON.stringify(lr.error)+' (wanted '+botLev+'x)');
+    }
     else log('leverage set to '+botLev+'x');
-    let lots=computeContracts(prod, pick.mark||1);
-    const maxLots=parseInt($('botMaxLots')?.value)||50;
-    lots=Math.max(1, Math.min(lots, maxLots));
+    const lots=computeContracts(prod, pick.mark);
+    const maxLots=mc.maxLots;
     const jr=await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:lots,side:dir,order_type:'market_order'}});
     if(jr.success===false){log('x entry rejected: '+JSON.stringify(jr.error));recentCoins=[pick.sym];botBusy=false;return;}
-    log('entered '+dir.toUpperCase()+' '+lots+' lots '+pick.sym+' (balance-based, cap '+maxLots+')');
+    log('entered '+dir.toUpperCase()+' '+lots+' lots '+pick.sym+' ≈ $'+(lots*pick.mark*(+prod.contract_value||1)).toFixed(2)+' position ($'+mc.money+' x '+botLev+'x, cap '+maxLots+' lots)');
     let pos=null;
     for(let i=0;i<6&&!pos;i++){
       await new Promise(r=>setTimeout(r,1200));
@@ -1763,18 +1818,22 @@ $('autoExec')?.addEventListener('change',()=>{
       log(isLive?'🔴 auto-resumed on LIVE (from saved Start Robot)':'🤖 auto-resumed (testnet)');
       startRobotLoop();
     }else{
-      const mode=$('sizeMode').value, pct=$('botPct').value;
-      const sizeDesc = mode==='pct' ? `${pct}% of balance (auto lots per coin)` : `${pct} fixed contracts`;
+      const mc=moneyCfg();
       const isLive = ENV!=='testnet';
       let ok;
       if(isLive){
         // MANDATORY: a daily loss limit must be set before live auto-trading
         if(!(+$('dailyLimit').value>0)){
-          alert('Set a Daily Loss Limit first (Risk Guard panel).\n\nThe robot will not trade real money without a hard loss cap. Example: 3 (stops after $3 of losses today).');
+          alert('Set Max loss per day first (Money Control panel).\n\nThe robot will not trade real money without a hard loss cap. Example: 3 (stops after $3 of losses today).');
           $('autoExec').checked=false; localStorage.setItem('dx_master','0');
           updateRobotStatus(); return;
         }
-        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nSizing: ${sizeDesc}\nSL ${$('botSL').value}% / TP ${$('botTP').value}%\nDaily loss limit: ${$('dailyLimit').value}\n\nOnce ON, it STAYS ON across refreshes until you turn it off.\n\nContinue?`);
+        if(!(mc.money>0) || !availBalance || mc.money>availBalance){
+          alert('Check Money per trade (Money Control panel).\n\nMoney per trade: $'+mc.money+'\nAvailable on Delta: '+(availBalance?'$'+availBalance.toFixed(2):'not loaded — connect the proxy')+'\n\nIt must be more than $0 and not more than your available balance.');
+          $('autoExec').checked=false; localStorage.setItem('dx_master','0');
+          updateRobotStatus(); return;
+        }
+        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nDelta balance: $${availBalance.toFixed(2)} available\nMoney per trade: $${mc.money} × ${mc.lev}x leverage = $${(mc.money*mc.lev).toFixed(2)} position\nStop-loss ${mc.sl}% ≈ −$${(mc.money*mc.lev*(mc.sl/100+FEE_RT)).toFixed(2)} per losing trade\nTake-profit ${mc.tp}%\nMax loss per day: $${mc.dayMax} (robot switches off)\n\nOnce ON, it STAYS ON across refreshes until you turn it off.\n\nContinue?`);
         if(ok){
           const typed=prompt('Type  LIVE  (in capitals) to confirm real-money auto-trading:');
           if((typed||'').trim()!=='LIVE'){ok=false;}
@@ -1793,7 +1852,7 @@ $('autoExec')?.addEventListener('change',()=>{
   }
   updateRobotStatus();
 });
-['botPct','botScore','slPct','tpPct','lev','sizeMode','dailyLimit','botCooldown','trailStep','botSL','botTP','botMaxLots','botLev'].forEach(id=>{
+['botMoney','slPct','tpPct','lev','dailyLimit','botCooldown','trailStep','botSL','botTP','botMaxLots','botLev'].forEach(id=>{
   const el=$(id); if(!el)return;
   // restore saved value
   const saved=localStorage.getItem('dx_set_'+id);
@@ -1860,8 +1919,7 @@ function cancelResume(){
 }
 window.cancelResume=cancelResume;
 updateSizeCalc();
-$('sizeMode')?.addEventListener('change',()=>{localStorage.setItem('dx_set_sizeMode',$('sizeMode').value);updateSizeCalc();});
-$('botPct')?.addEventListener('input',()=>{localStorage.setItem('dx_set_botPct',$('botPct').value);updateSizeCalc();});
+refreshRobotBalance();   // real Delta balance for Money Control (shows a prompt if not connected)
 updateSizeCalc();
 ['botSize','botScore'].forEach(id=>$(id)?.addEventListener('input',updateRobotStatus));
 updateRobotStatus();
