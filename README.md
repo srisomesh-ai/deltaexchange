@@ -65,7 +65,6 @@ Turned on with the **Start Robot** toggle. Every 20 seconds it:
 
 Settings live in **Auto-Pilot Settings** (balance %, max lots, SL %, TP %, leverage, trail step).
 The dashboard defaults to **TESTNET**. Arming on LIVE requires a confirmation and typing `LIVE`.
-**Why no trades?** runs a one-tap diagnostic of every gate.
 
 ## Security notes
 
