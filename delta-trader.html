@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v62</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v63</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -361,9 +361,9 @@ if(sessionStorage.getItem('dx_auth')==='1'){
         <div class="card-b">
           <div class="row2">
             <div class="fld"><label>Daily loss limit</label><input id="dailyLimit" type="number" step="any" value="3" placeholder="3"></div>
-            <div class="fld"><label>Live PnL</label><input id="todayPnl" type="number" step="any" value="0" readonly style="background:#eef1f5"></div>
+            <div class="fld"><label>Today's PnL</label><input id="todayPnl" type="number" step="any" value="0" readonly style="background:#eef1f5"></div>
           </div>
-          <div id="guardMsg" style="font-size:11px;color:var(--muted)">Blocks new entries past the loss limit. Open positions untouched.</div>
+          <div id="guardMsg" style="font-size:11px;color:var(--muted)">Stops the robot and blocks new entries once today's loss reaches the limit. Open positions keep their SL/TP.</div>
         </div>
       </div>
 
@@ -781,14 +781,43 @@ async function loadPositions(){
         if(closedProdId)cleanupStops(closedProdId);
       }
     }
-    // feed live PnL into the risk guard
-    const totPnl=(j.result||[]).reduce((s,p)=>s+(+p.unrealized_pnl||0),0);
-    if($('todayPnl'))$('todayPnl').value=totPnl.toFixed(2);
-    checkGuard();
+    // feed today's PnL (closed trades + fees + open uPnL) into the risk guard
+    refreshDayPnl(j.result).catch(()=>{});
     if(!rows.length){$('posBox').innerHTML='<div class="dim">No open positions.</div>';return;}
     $('posBox').innerHTML='<table><tr><th>Sym</th><th>Size</th><th>Entry</th><th>uPnL</th></tr>'+
       rows.map(p=>`<tr><td>${p.product_symbol||p.product_id}</td><td class="${+p.size>0?'g':'r'}">${p.size}</td><td>${fmt(+p.entry_price,priceDp())}</td><td class="${+p.unrealized_pnl>=0?'g':'r'}">${fmt(+p.unrealized_pnl,2)}</td></tr>`).join('')+'</table>';
   }catch(e){$('posBox').innerHTML='<div class="r">'+e.message+'</div>';}
+}
+/* ===== TODAY'S PnL: wallet equity now vs. start of day =====
+   equity = settle-currency wallet balance + unrealized PnL of open positions.
+   The first reading of each calendar day (per env) is the baseline, so closed
+   trades, fees and the open trade all count. Deposits/withdrawals during the
+   day shift it too. Wallet balance is cached 15s unless fresh is requested. */
+let walletCache={t:0,bal:null};
+async function refreshDayPnl(positions, fresh){
+  if(!PROXY)return null;
+  if(fresh || walletCache.bal===null || Date.now()-walletCache.t>15000){
+    const bj=await proxy('GET','/v2/wallet/balances');
+    if(bj.success===false)throw new Error('balance: '+JSON.stringify(bj.error));
+    const all=bj.result||[];
+    const settle=all.find(b=>/USD/i.test(b.asset_symbol||b.asset?.symbol||b.symbol||''))||all[0];
+    if(!settle)throw new Error('no settle-currency balance');
+    walletCache={t:Date.now(),bal:+(settle.balance ?? settle.wallet_balance ?? settle.available_balance ?? 0)};
+  }
+  if(!positions){
+    const pj=await proxy('GET','/v2/positions/margined');
+    if(pj.success===false)throw new Error('positions: '+JSON.stringify(pj.error));
+    positions=pj.result||[];
+  }
+  const upnl=positions.reduce((s,p)=>s+(+p.size!==0?(+p.unrealized_pnl||0):0),0);
+  const equity=walletCache.bal+upnl;
+  const key='dx_dayStart_'+ENV, today=new Date().toDateString();
+  let start=null; try{start=JSON.parse(localStorage.getItem(key)||'null');}catch(e){}
+  if(!start||start.d!==today||!isFinite(start.eq)){start={d:today,eq:equity};localStorage.setItem(key,JSON.stringify(start));}
+  const pnl=equity-start.eq;
+  if($('todayPnl'))$('todayPnl').value=pnl.toFixed(2);
+  checkGuard();
+  return pnl;
 }
 function checkGuard(){
   const lim=+$('dailyLimit').value||0;
@@ -1261,7 +1290,6 @@ function updateRobotStatus(){
   const autoOn=$('autoExec')?.checked;
   const light=$('rsLight'), state=$('rsState'), detail=$('rsDetail'), box=$('robotStatus');
   if(!light)return;
-  const size=$('botSize')?.value||1, minS=$('botScore')?.value||0.45;
 
   // ── OPEN TRADE takes priority over everything ──
   // If a position is live (even after refresh with auto-pilot off), show it.
@@ -1325,9 +1353,7 @@ function updateRobotStatus(){
     }
     detail.innerHTML=`<b style="font-size:13px;color:var(--txt)">Trading: ${t.sym||cur.symbol}</b><br>Holding <b>${t.side.toUpperCase()}</b> ${t.size} @ ${fmt(t.entry,priceDp())}${trailTxt}`;
   }else{
-    const nextPick=lastScan.find(c=>c.dir!=='—' && c.strength>=(+($('botScore').value||0.45)));
-    const willTrade = nextPick ? `<b style="font-size:14px;color:var(--green)">Will trade: ${nextPick.sym} ${nextPick.dir}</b>` : `<span style="color:var(--dim)">Scanning for a coin above min strength…</span>`;
-    detail.innerHTML=`${willTrade}<br>Robot auto-picks the strongest coin from the scanner (size <b>${size}</b>, min strength <b>${minS}</b>) and trades it. One position at a time.`;
+    detail.innerHTML=`<span style="color:var(--dim)">Scanning every 20s for a mover ≥1%…</span><br>Robot trades the top mover (funding fade or momentum), sized from balance, with SL/TP. One position at a time.`;
   }
 }
 
@@ -1498,7 +1524,14 @@ async function whyNoTrades(){
     say('✓ no open position blocking');
   }catch(e){say('⚠ could not check positions: '+e.message);}
   availBalance?say('✓ balance '+availBalance.toFixed(2)):say('⚠ balance not loaded — lot size falls back to the 1-lot minimum');
-  if(guardBlocks())say('⚠ Daily loss limit HIT ('+$('dailyLimit').value+') — note: blocks manual orders, but SIMPLE MODE does not check it. Turn the robot off if you want to stop.');
+  const lossLim=+$('dailyLimit')?.value||0;
+  if(lossLim>0){
+    try{
+      const dp=await refreshDayPnl(null,true);
+      if(dp<=-Math.abs(lossLim)){say('⛔ Daily loss limit HIT: today '+dp.toFixed(2)+' (limit -'+Math.abs(lossLim)+') — robot stops itself. Raise the limit or wait for tomorrow.');finish();return;}
+      say('✓ loss limit ok: today '+dp.toFixed(2)+' (limit -'+Math.abs(lossLim)+')');
+    }catch(e){say('❌ loss-limit check failed ('+e.message+') — robot skips entries until it works.');finish();return;}
+  }else say('⚠ no daily loss limit set — robot has no loss cap');
   say('— scanning market (same rules as the robot)…');
   try{
     const tj=await pubGet('/v2/tickers','','live');
@@ -1570,6 +1603,20 @@ async function simpleTick(){
       const pid=robotOpenTrade.prodId;
       robotOpenTrade=null;saveRobotTrade();updateRobotStatus();
       if(pid)cleanupStops(pid);
+    }
+    // DAILY LOSS LIMIT: checked before every new entry; hitting it switches the robot off
+    const lossLim=+$('dailyLimit')?.value||0;
+    if(lossLim>0){
+      let dayPnl;
+      try{dayPnl=await refreshDayPnl(pj.result,true);}
+      catch(e){log('x loss-limit check failed ('+e.message+') - skipping entry, will retry');botBusy=false;return;}
+      if(dayPnl<=-Math.abs(lossLim)){
+        log('🛑 DAILY LOSS LIMIT HIT: today '+dayPnl.toFixed(2)+' (limit -'+Math.abs(lossLim)+') - robot switched OFF');
+        const mm=$('masterMsg'); if(mm)mm.innerHTML='<span class="r">🛑 Robot stopped: daily loss limit hit (today '+dayPnl.toFixed(2)+'). Turning it back on stops again until tomorrow or a higher limit.</span>';
+        botBusy=false;
+        setMasterState(false);
+        return;
+      }
     }
     const tj=await pubGet('/v2/tickers','','live');
     if(!tj.result){log('x scan failed - no ticker data');botBusy=false;return;}
@@ -1716,7 +1763,7 @@ $('autoExec')?.addEventListener('change',()=>{
       log(isLive?'🔴 auto-resumed on LIVE (from saved Start Robot)':'🤖 auto-resumed (testnet)');
       startRobotLoop();
     }else{
-      const mode=$('sizeMode').value, pct=$('botPct').value, minS=$('botScore').value;
+      const mode=$('sizeMode').value, pct=$('botPct').value;
       const sizeDesc = mode==='pct' ? `${pct}% of balance (auto lots per coin)` : `${pct} fixed contracts`;
       const isLive = ENV!=='testnet';
       let ok;
@@ -1727,7 +1774,7 @@ $('autoExec')?.addEventListener('change',()=>{
           $('autoExec').checked=false; localStorage.setItem('dx_master','0');
           updateRobotStatus(); return;
         }
-        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nSizing: ${sizeDesc}\nMin strength: ${minS}\nSL ${$('botSL').value}% / TP ${$('botTP').value}%\nDaily loss limit: ${$('dailyLimit').value}\nMax trades/day: ${$('botMaxTrades')?.value||10}\n\nOnce ON, it STAYS ON across refreshes until you turn it off.\n\nContinue?`);
+        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nSizing: ${sizeDesc}\nSL ${$('botSL').value}% / TP ${$('botTP').value}%\nDaily loss limit: ${$('dailyLimit').value}\n\nOnce ON, it STAYS ON across refreshes until you turn it off.\n\nContinue?`);
         if(ok){
           const typed=prompt('Type  LIVE  (in capitals) to confirm real-money auto-trading:');
           if((typed||'').trim()!=='LIVE'){ok=false;}

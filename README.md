@@ -63,6 +63,12 @@ Turned on with the **Start Robot** toggle. Every 20 seconds it:
 5. Places a stop-loss and take-profit, then **verifies on the exchange** that the stop exists.
    If it can't be confirmed after one retry, the position is closed immediately.
 
+**Daily loss limit** (Risk Guard panel): before every new entry the robot checks today's PnL —
+wallet balance + open-position PnL compared with the first reading of the day (closed trades and
+fees count). When the loss reaches the limit it switches itself **off** and blocks manual orders;
+an open trade keeps its SL/TP. If the check can't read your balance, the robot skips the entry
+rather than trading blind. Deposits/withdrawals during the day move the number too. Set it to 0 to disable.
+
 Settings live in **Auto-Pilot Settings** (balance %, max lots, SL %, TP %, leverage, trail step).
 The dashboard defaults to **TESTNET**. Arming on LIVE requires a confirmation and typing `LIVE`.
 **🔍 Why no trades?** (under the robot status) runs every check the robot makes, without placing
