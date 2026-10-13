@@ -136,7 +136,7 @@
 <script>
 /* ===== LOGIN GATE ===== */
 // Credentials are stored as SHA-256 hashes so they are not readable in the page source.
-// Default: user "somu" / password "Somu@2026" — change via changeLogin() in console or ask to update.
+// To change the login: run  await sha256("NewPassword")  in the browser console and paste the result into passHash.
 const AUTH={
   user:'somu',
   passHash:'49bb49b64643c9f971be6df842a4104bffe8f1ebffbf822ec6acf82e2540a391'
@@ -1031,30 +1031,6 @@ function valAgo(arr,ms,key){
   return old? old[key] : null;
 }
 
-/* ===== TREND FILTER: multi-minute direction from candles ===== */
-// caches trend per symbol so we don't hammer the API; refreshes each entry ~2min
-const trendCache={};  // sym -> {t, trend:-1..+1, dir:'up'/'down'/'flat'}
-async function getTrend(sym){
-  const c=trendCache[sym];
-  if(c && Date.now()-c.t < 120000) return c;  // 2-min cache
-  try{
-    // last ~30 min of 1-minute candles
-    const end=Math.floor(Date.now()/1000), start=end-1800;
-    const j=await pubGet('/v2/history/candles','?resolution=1m&symbol='+sym+'&start='+start+'&end='+end,'live');
-    const cd=(j.result||[]).slice().sort((a,b)=>a.time-b.time);
-    if(cd.length<10){const r={t:Date.now(),trend:0,dir:'flat'};trendCache[sym]=r;return r;}
-    const closes=cd.map(x=>+x.close);
-    // simple trend: compare short MA (last 5) vs long MA (last 20), normalized
-    const maShort=closes.slice(-5).reduce((a,b)=>a+b,0)/5;
-    const maLong=closes.slice(-20).reduce((a,b)=>a+b,0)/Math.min(20,closes.length);
-    const slope=(maShort-maLong)/maLong;             // +ve = uptrend
-    const trend=Math.max(-1,Math.min(1, slope*200));  // scale
-    const dir = trend>0.15?'up' : trend<-0.15?'down' : 'flat';
-    const r={t:Date.now(),trend:+trend.toFixed(3),dir};
-    trendCache[sym]=r; return r;
-  }catch(e){const r={t:Date.now(),trend:0,dir:'flat'};trendCache[sym]=r;return r;}
-}
-
 function runSignal(imb){
   // always update history + component displays
   const mark=+ticker.mark_price;
@@ -1111,7 +1087,7 @@ function runSignal(imb){
     $('jCount').textContent=journal.length;
     log(`▶ ${dir} @ ${fmt(mark,priceDp())}  score=${score.toFixed(2)} [ob${obScore.toFixed(1)} mo${momPct.toFixed(2)} oi${(oiDelta*100).toFixed(1)} fu${(fr*100).toFixed(3)}]`);
 
-    // (Auto-execution is handled by the scanner-driven robotTick loop,
+    // (Auto-execution is handled by the SIMPLE MODE simpleTick loop,
     //  which auto-picks the strongest coin — not just the loaded one.)
 
     // capture this entry's own symbol so the 60s check compares the RIGHT coin
@@ -1666,250 +1642,6 @@ function startRobotLoop(){
 }
 function stopRobotLoop(){ clearInterval(robotLoopTimer); robotLoopTimer=null; }
 
-async function robotTick(){
-  if(!$('autoExec')?.checked || !$('sigOn')?.checked) return;
-  if(botBusy) return;
-  // TESTNET AUTO-UNBLOCK: an adopted (reconnected) leftover demo position can block forever
-  // if it has no SL/TP. On demo, just close it and move on — it's paper money.
-  if(robotOpenTrade && ENV==='testnet' && robotOpenTrade.reconnected){
-    botBusy=true;
-    try{
-      const prodId=robotOpenTrade.prodId;
-      const closeSide=robotOpenTrade.side==='buy'?'sell':'buy';
-      log('🧹 demo cleanup: closing leftover position '+robotOpenTrade.sym+' that was blocking the robot');
-      await proxy('POST','/v2/orders',{body:{product_id:prodId,size:robotOpenTrade.size,side:closeSide,order_type:'market_order',reduce_only:true}}).catch(()=>{});
-      if(prodId)await cleanupStops(prodId);
-      robotOpenTrade=null;saveRobotTrade();updateRobotStatus();
-    }catch(e){log('   cleanup error: '+e.message);}
-    botBusy=false;
-    return; // next tick trades fresh
-  }
-  if(robotOpenTrade) return;   // one position at a time (robot's own trade)
-  if(typeof guardBlocks==='function' && guardBlocks()){
-    log('🛑 daily loss limit hit — robot paused, no new entries');
-    return;
-  }
-  // MAX TRADES/DAY cap — protects against fee bleed from over-trading
-  const today=new Date().toDateString();
-  let tc={d:today,n:0};
-  try{tc=JSON.parse(localStorage.getItem('dx_tradeCount')||'{}');if(tc.d!==today)tc={d:today,n:0};}catch(e){tc={d:today,n:0};}
-  const maxT=+($('botMaxTrades')?.value||10);
-  if(tc.n>=maxT){
-    const rd=$('rsDetail'); if(rd)rd.innerHTML='<b>Daily trade cap reached</b> ('+tc.n+'/'+maxT+'). Resumes tomorrow — protects you from fee bleed.';
-    return;
-  }
-
-  // COOLDOWN: don't fire again too soon after last trade (anti over-trading / fee bleed)
-  const cooldownMin=+($('botCooldown')?.value||3);
-  if(Date.now()-lastTradeTime < cooldownMin*60000){
-    const wait=Math.ceil((cooldownMin*60000-(Date.now()-lastTradeTime))/1000);
-    const st=$('rsDetail'); // soft note, don't spam log
-    return;
-  }
-  botBusy=true;
-  try{
-    await runScan();
-    const minStr=+($('botScore').value||0.30);
-    // count how many coins pass each gate — so waiting is explainable
-    const directional=lastScan.filter(c=>c.dir!=='—');
-    const strongEnough=directional.filter(c=>c.strength>=minStr);
-    const notRecent=strongEnough.filter(c=>!recentCoins.includes(c.sym));
-    // FUNDING FILTER (data-backed): journal showed high-funding coins are the only profitable group
-    // (>3% funding: 70% wins, +1.58% net; low funding: net loss). Trade only where the edge is.
-    const minFund=+($('botMinFund')?.value||3);
-    const fundOn=$('fundFilter')?.checked;
-    const fundOk = fundOn ? notRecent.filter(c=>Math.abs((c.fr||0)*100)>=minFund) : notRecent;
-    // pick the strongest candidate that is actually tradeable on the CURRENT env
-    // (scan uses live data; testnet may not list every coin)
-    const pick=fundOk.find(c=>products.some(p=>p.symbol===c.sym));
-    if(!pick){
-      const best=directional[0];
-      let why='';
-      if(!directional.length) why='no coin has a clear direction right now';
-      else if(!strongEnough.length) why=`${directional.length} coins have direction but none reach strength ${minStr} (best: ${best.sym} ${best.strength.toFixed(2)})`;
-      else if(!notRecent.length) why=`${strongEnough.length} qualify but all recently traded (${recentCoins.join(', ')})`;
-      else if(fundOk.length) why=`${fundOk.length} qualify but none is listed on ${ENV.toUpperCase()} — candidates: ${fundOk.slice(0,3).map(c=>c.sym).join(', ')}`;
-      else why=`${notRecent.length} qualify but none has funding ≥${minFund}% (edge zone). Best funding: ${(Math.max(...notRecent.map(c=>Math.abs((c.fr||0)*100)))).toFixed(2)}%`;
-      log('🤖 waiting — '+why);
-      const rd=$('rsDetail'); if(rd && $('autoExec')?.checked)rd.innerHTML='<b>Scanning…</b> '+why;
-      botBusy=false;return;
-    }
-    if(fundOn)log(`🤖 ${pick.sym} funding ${((pick.fr||0)*100).toFixed(2)}% — in the edge zone ✓`);
-
-    // 3. verify no open position anywhere (true one-at-a-time)
-    const pj=await proxy('GET','/v2/positions/margined');
-    const openPos=(pj.result||[]).find(p=>+p.size!==0);
-    if(openPos){
-      const nm=openPos.product_symbol||('id '+openPos.product_id);
-      if(ENV==='testnet'){
-        log('🧹 demo cleanup: closing blocking position '+nm+' (size '+openPos.size+')');
-        const cs=+openPos.size>0?'sell':'buy';  // best-effort; wrong side gets rejected harmlessly (reduce-only)
-        await proxy('POST','/v2/orders',{body:{product_id:openPos.product_id,size:Math.abs(+openPos.size),side:cs,order_type:'market_order',reduce_only:true}}).catch(()=>{});
-        await proxy('POST','/v2/orders',{body:{product_id:openPos.product_id,size:Math.abs(+openPos.size),side:(cs==='sell'?'buy':'sell'),order_type:'market_order',reduce_only:true}}).catch(()=>{});
-        if(openPos.product_id)await cleanupStops(openPos.product_id);
-        botBusy=false;return; // trade fresh next tick
-      }
-      log('🤖 blocked by open position: '+nm+' (size '+openPos.size+') — close it on Delta to let the robot trade');
-      const rd=$('rsDetail'); if(rd)rd.innerHTML='⛔ <b>Blocked by open position: '+nm+'</b> (size '+openPos.size+'). Robot trades one at a time — close it on Delta to unblock.';
-      botBusy=false;return;
-    }
-
-    // 3b. TREND FILTER — only trade WITH the multi-minute trend (if enabled)
-    if($('trendFilter')?.checked){
-      const tr=await getTrend(pick.sym);
-      const wantLong = pick.dir==='LONG';
-      const agrees = (wantLong && tr.dir!=='down') || (!wantLong && tr.dir!=='up');
-      if(!agrees){
-        log(`🤖 skipped ${pick.sym} ${pick.dir} — fights ${tr.dir}trend (trend ${tr.trend>=0?'+':''}${tr.trend}). Turn off Trend filter to allow it.`);
-        recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);  // skip it this round
-        botBusy=false;return;
-      }
-      log(`🤖 ${pick.sym} ${pick.dir} agrees with ${tr.dir}trend ✓`);
-    }
-
-    // 3c. ORDER-BOOK AGREEMENT (data-backed): in your journal, funding-zone trades where the
-    // book agreed with the direction won 80% (+2.70%); where it disagreed they won 40% (-1.12%).
-    if($('obFilter')?.checked!==false){
-      try{
-        const bj=await pubGet('/v2/l2orderbook/'+pick.sym,'','live');
-        const res=bj.result||{};
-        const sum=(arr)=> (arr||[]).slice(0,10).reduce((a,l)=>a+(+l.size||0),0);
-        const bidD=sum(res.buy), askD=sum(res.sell);
-        const imb=(bidD+askD)>0 ? bidD/(bidD+askD) : 0.5;
-        const bookAgrees = (pick.dir==='LONG' && imb>0.5) || (pick.dir==='SHORT' && imb<0.5);
-        if(!bookAgrees){
-          log(`🤖 skipped ${pick.sym} ${pick.dir} — order book disagrees (bid share ${(imb*100).toFixed(0)}%). This combo lost 60% of the time in your data.`);
-          recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);
-          botBusy=false;return;
-        }
-        log(`🤖 ${pick.sym} book agrees (bid share ${(imb*100).toFixed(0)}%) ✓ — this combo won 80% in your data`);
-      }catch(e){log('   book check failed ('+e.message+') — proceeding without it');}
-    }
-
-    // 4. find the product for this symbol and place the trade
-    const prod=products.find(p=>p.symbol===pick.sym);
-    if(!prod){log('🤖 product not found for '+pick.sym);botBusy=false;return;}
-    // load it into the UI too so the user sees what the robot is trading
-    selectSymbol(pick.sym);
-    // sync the manual side + buttons to the robot's direction so the SL/TP preview is correct
-    if(typeof setSide==='function')setSide(pick.dir==='LONG'?'buy':'sell');
-
-    const botSide = pick.dir==='LONG'?'buy':'sell';
-    const mark=pick.mark;
-    let size=computeContracts(prod, mark);
-    if(!size || size<1){
-      if(ENV==='testnet'){size=1;log('   size calc gave 0 (balance not loaded?) — demo fallback: 1 contract');}
-      else{log('🤖 size calc gave 0 — balance too small or not loaded. Increase balance % or check Connect.');botBusy=false;return;}
-    }
-    const slP=+$('botSL').value||0.5, tpP=+$('botTP').value||1.0;
-    const tick=prod.tick_size?+prod.tick_size:0.5;
-    const rnd=px=>(Math.round(px/tick)*tick).toFixed(String(tick).includes('.')?String(tick).split('.')[1].length:0);
-
-    const lev=parseInt($('botLev')?.value)||parseInt($('lev')?.value)||2;
-    await proxy('POST','/v2/products/'+prod.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
-
-    // ── STEP 1: plain market entry (no bracket — brackets fail silently) ──
-    const jr=await proxy('POST','/v2/orders',{body:{
-      product_id:prod.id, product_symbol:prod.symbol, size, side:botSide, order_type:'market_order'
-    }});
-    if(jr.success===false){log('🤖✗ '+pick.sym+' rejected: '+JSON.stringify(jr.error));botBusy=false;return;}
-
-    // ── STEP 2: read the ACTUAL position back from the exchange (source of truth) ──
-    let pos=null;
-    for(let i=0;i<6 && !pos;i++){
-      await new Promise(r=>setTimeout(r,1200));
-      try{
-        const pj2=await proxy('GET','/v2/positions/margined');
-        pos=(pj2.result||[]).find(p=>(p.product_id===prod.id||p.product_symbol===prod.symbol)&&+p.size!==0)||null;
-      }catch(e){}
-    }
-    if(!pos){log('🤖⚠ entry sent but no position visible after 7s — check Delta manually');botBusy=false;return;}
-
-    // Direction from REALITY: we know what we sent; the exchange confirms a position exists.
-    // Entry price from the exchange, not our estimate.
-    const realEntry=+pos.entry_price||mark;
-    const realSize=Math.abs(+pos.size);
-    const isBuy=botSide==='buy';
-    const sl=rnd(isBuy?realEntry*(1-slP/100):realEntry*(1+slP/100));
-    const tp=rnd(isBuy?realEntry*(1+tpP/100):realEntry*(1-tpP/100));
-    const closeSide=isBuy?'sell':'buy';
-
-    // ── STEP 3: protect it — reduce-only stop + take-profit from actual position ──
-    let slOk=false, slErr='';
-    for(let attempt=0; attempt<3 && !slOk; attempt++){
-      const r=await proxy('POST','/v2/orders',{body:{
-        product_id:prod.id, size:realSize, side:closeSide,
-        order_type:'market_order', stop_order_type:'stop_loss_order',
-        stop_price:String(sl), stop_trigger_method:'mark_price', reduce_only:true
-      }});
-      if(r.success!==false){slOk=true;}
-      else{slErr=JSON.stringify(r.error);await new Promise(x=>setTimeout(x,1000));}
-    }
-    if(!slOk){
-      // NEVER hold an unprotected position: close it immediately
-      log('🤖🛑 could not place stop-loss ('+slErr+') — CLOSING position immediately for safety');
-      await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:realSize,side:closeSide,order_type:'market_order',reduce_only:true}}).catch(()=>{});
-      botBusy=false;return;
-    }
-    // take-profit (best effort — stop is the critical one)
-    await proxy('POST','/v2/orders',{body:{
-      product_id:prod.id, size:realSize, side:closeSide,
-      order_type:'limit_order', limit_price:String(tp), reduce_only:true
-    }}).catch(()=>{});
-
-    robotOpenTrade={side:botSide,entry:realEntry,size:realSize,sym:pick.sym,
-      prodId:prod.id, tick, slP, tpP,
-      curSL:+sl, curTP:+tp, steps:0, lastStepPrice:realEntry,
-      stepPct:(+$('trailStep')?.value||slP)};
-    saveRobotTrade();
-    lastTradeTime=Date.now();
-    try{const td=new Date().toDateString();let c=JSON.parse(localStorage.getItem('dx_tradeCount')||'{}');if(c.d!==td)c={d:td,n:0};c.n++;localStorage.setItem('dx_tradeCount',JSON.stringify(c));}catch(e){}
-    recentCoins.unshift(pick.sym); recentCoins=recentCoins.slice(0,3);
-    log(`🤖✓ ${botSide.toUpperCase()} ${realSize} ${pick.sym} @${fmt(realEntry,priceDp())} · 🛡 SL ${sl} confirmed · TP ${tp}  (strength ${(pick.strength*100).toFixed(0)})`);
-    updateRobotStatus();
-    loadPositions();
-  }catch(e){log('🤖 loop error: '+e.message);}
-  botBusy=false;
-}
-async function maybeAutoExecute(dir, score, mark){
-  const ae=$('autoExec');
-  if(!ae?.checked) return;
-  const minScore=+$('botScore').value||0.45;
-  if(Math.abs(score)<minScore){log(`   ·score ${score.toFixed(2)} < min ${minScore}, no trade`);return;}
-  if(botBusy)return;
-  botBusy=true;
-  try{
-    // ONE POSITION AT A TIME: check for any open position on this symbol
-    const pj=await proxy('GET','/v2/positions/margined');
-    const openHere=(pj.result||[]).some(p=>+p.size!==0 && (p.product_symbol===cur.symbol||p.product_id===cur.id));
-    if(openHere){log('   ·position already open, robot waits');botBusy=false;return;}
-
-    const botSide = dir==='LONG'?'buy':'sell';
-    const size=parseInt($('botSize').value)||1;
-    const slP=+$('botSL').value||0.5, tpP=+$('botTP').value||1.0;
-    const isBuy=botSide==='buy';
-    const sl=roundTick(isBuy?mark*(1-slP/100):mark*(1+slP/100));
-    const tp=roundTick(isBuy?mark*(1+tpP/100):mark*(1-tpP/100));
-    const body={
-      product_id:cur.id, product_symbol:cur.symbol, size, side:botSide, order_type:'market_order',
-      bracket_stop_loss_price:String(sl), bracket_stop_loss_limit_price:String(sl),
-      bracket_take_profit_price:String(tp), bracket_take_profit_limit_price:String(tp),
-      bracket_stop_trigger_method:'mark_price'
-    };
-    const lev=parseInt($('botLev')?.value)||parseInt($('lev')?.value)||2;
-    await proxy('POST','/v2/products/'+cur.id+'/orders/leverage',{body:{leverage:String(lev)}}).catch(()=>{});
-    const j=await proxy('POST','/v2/orders',{body});
-    if(j.success===false){log('   🤖✗ rejected: '+JSON.stringify(j.error));}
-    else{
-      robotOpenTrade={side:botSide,entry:mark,size};
-      saveRobotTrade();
-      log(`   🤖✓ ${botSide.toUpperCase()} ${size} @mkt  SL ${sl} TP ${tp}  id=${j.result?.id}`);
-      updateRobotStatus();
-      loadPositions();
-    }
-  }catch(e){log('   🤖 error: '+e.message);}
-  botBusy=false;
-}
 
 function exportJournal(){
   if(!journal.length){alert('Journal empty — turn the engine on and let it run.');return;}

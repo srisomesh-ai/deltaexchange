@@ -18,7 +18,7 @@
  *   $API_KEY      = 'your_delta_api_key';
  *   $API_SECRET   = 'your_delta_api_secret';
  *   $PROXY_TOKEN  = 'a_password_you_invent';   // must match dashboard ⚙ token
- *   $ALLOWED_ORIGIN = '*';   // or 'https://yourdomain.com' to lock down
+ *   $ALLOWED_ORIGIN = '';    // '' = only this site; or 'https://other.com' if the dashboard is hosted elsewhere
  *
  * SECURITY:
  *   - Keep this file's URL private. Anyone who can POST here + knows the token
@@ -45,7 +45,7 @@ if (!file_exists($cfgFile)) {
     exit;
 }
 require $cfgFile;   // defines $API_KEY, $API_SECRET, $PROXY_TOKEN, $ALLOWED_ORIGIN
-if (!isset($ALLOWED_ORIGIN)) $ALLOWED_ORIGIN = '*';
+if (!isset($ALLOWED_ORIGIN)) $ALLOWED_ORIGIN = '';
 if (empty($API_KEY) || empty($API_SECRET) || empty($PROXY_TOKEN)) {
     http_response_code(500);
     echo json_encode(['success'=>false,'error'=>basename($cfgFile).' is missing one of API_KEY / API_SECRET / PROXY_TOKEN.']);
@@ -54,9 +54,18 @@ if (empty($API_KEY) || empty($API_SECRET) || empty($PROXY_TOKEN)) {
 // ====================================================================
 
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: ' . $ALLOWED_ORIGIN);
-header('Access-Control-Allow-Headers: Content-Type, X-Proxy-Token');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
+// CORS: a dashboard on this same site needs no CORS header at all. Other sites are
+// allowed only if listed in $ALLOWED_ORIGIN (comma-separated). '*' is ignored on
+// purpose — it would let any website drive this proxy from a visitor's browser.
+$origin  = $_SERVER['HTTP_ORIGIN'] ?? '';
+$allowed = array_filter(array_map(function ($o) { return rtrim(trim($o), '/'); }, explode(',', $ALLOWED_ORIGIN)),
+                        function ($o) { return $o !== '' && $o !== '*'; });
+if ($origin !== '' && in_array($origin, $allowed, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+    header('Access-Control-Allow-Headers: Content-Type, X-Proxy-Token');
+    header('Access-Control-Allow-Methods: POST, OPTIONS');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
@@ -104,17 +113,26 @@ if (!hash_equals($PROXY_TOKEN, $hdrToken)) {
 // ---- SETTINGS SYNC (cross-device): save/load a JSON blob server-side ----
 // Dashboard sends {"sync":"save","data":{...}} or {"sync":"load"}
 // Stored in a file next to this proxy so phone & PC share the same settings.
+// The file is .php and starts with an exit guard, so visiting its URL shows
+// nothing — a plain .json in the web root could be downloaded by anyone.
 if (!empty($req['sync'])) {
-    $syncFile = __DIR__ . '/somu-settings.json';
+    $syncFile  = __DIR__ . '/somu-settings.php';
+    $syncGuard = "<?php exit; ?>\n";
+    $legacy    = __DIR__ . '/somu-settings.json';
+    if (!is_file($syncFile) && is_file($legacy)) {   // one-time move of the old public file
+        @file_put_contents($syncFile, $syncGuard . @file_get_contents($legacy));
+    }
+    if (is_file($legacy) && is_file($syncFile)) @unlink($legacy);
     if ($req['sync'] === 'save') {
         $blob = json_encode($req['data'] ?? new stdClass());
-        $ok = @file_put_contents($syncFile, $blob) !== false;
+        $ok = @file_put_contents($syncFile, $syncGuard . $blob) !== false;
         echo json_encode(['success' => $ok]);
         exit;
     }
     if ($req['sync'] === 'load') {
         if (is_file($syncFile)) {
-            echo json_encode(['success' => true, 'data' => json_decode(@file_get_contents($syncFile), true)]);
+            $blob = substr((string) @file_get_contents($syncFile), strlen($syncGuard));
+            echo json_encode(['success' => true, 'data' => json_decode($blob, true)]);
         } else {
             echo json_encode(['success' => true, 'data' => null]);
         }

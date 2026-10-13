@@ -1,10 +1,11 @@
 <?php
 /**
  * key-test.php — one-tap Delta TESTNET key checker.
- * Visit this file in your browser. It reads delta-config-testnet.php,
+ * Visit  key-test.php?token=YOUR_PROXY_TOKEN  in your browser. It reads delta-config-testnet.php,
  * signs a real request to the demo exchange, and tells you plainly
  * whether the key works, what the balance is, or exactly what's wrong.
- * Safe: read-only request, never prints your secret.
+ * Safe: read-only request, never prints your secret, and shows nothing
+ * without the same PROXY_TOKEN the dashboard uses.
  */
 header('Content-Type: text/html; charset=utf-8');
 echo "<body style='font-family:system-ui;max-width:640px;margin:40px auto;line-height:1.6'>";
@@ -13,6 +14,11 @@ echo "<h2>Delta TESTNET key check</h2>";
 $cfg = __DIR__ . '/delta-config-testnet.php';
 if (!is_file($cfg)) { echo "<p>❌ <b>delta-config-testnet.php not found</b> next to this file.</p>"; exit; }
 require $cfg;
+if (empty($PROXY_TOKEN) || !hash_equals($PROXY_TOKEN, (string) ($_GET['token'] ?? ''))) {
+    http_response_code(401);
+    echo "<p>🔒 Add <code>?token=YOUR_PROXY_TOKEN</code> to the URL (the same token as the dashboard ⚙ setting).</p>";
+    exit;
+}
 if (empty($API_KEY) || empty($API_SECRET)) { echo "<p>❌ <b>API_KEY / API_SECRET empty</b> in delta-config-testnet.php.</p>"; exit; }
 echo "<p>✓ config loaded — key starts with <code>" . htmlspecialchars(substr($API_KEY,0,6)) . "…</code></p>";
 
@@ -55,7 +61,14 @@ if ($http === 200 && !empty($j['success'])) {
     echo "<p style='font-size:20px'>❌ <b>KEY REJECTED</b> (HTTP $http)</p>";
     echo "<p>Delta says: <code>" . htmlspecialchars(is_string($code)?$code:json_encode($code)) . "</code></p><ul>";
     $s = is_string($code) ? $code : json_encode($j);
-    if (stripos($s,'ip') !== false) echo "<li>→ <b>Whitelist this server's IP</b> in the demo key settings: <code>2a02:4780:11:1982:0:3838:2d1c:1</code></li>";
+    if (stripos($s,'ip') !== false) {
+        // look up this server's outbound IP live instead of hardcoding it
+        $ipc = curl_init('https://api64.ipify.org');
+        curl_setopt_array($ipc, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+        $ip = trim((string) curl_exec($ipc));
+        curl_close($ipc);
+        echo "<li>→ <b>Whitelist this server's IP</b> in the demo key settings: <code>" . htmlspecialchars($ip !== '' ? $ip : 'unknown — run  curl ifconfig.me  in the hPanel terminal') . "</code></li>";
+    }
     if (stripos($s,'signature') !== false) echo "<li>→ <b>Secret is wrong</b> — re-copy the API secret into delta-config-testnet.php (no spaces).</li>";
     if (stripos($s,'invalid_api_key') !== false || stripos($s,'unauthorized') !== false) echo "<li>→ <b>Key is wrong/inactive</b> — re-copy the API key, confirm it's a TESTNET key (not live), and that it has read + trade permissions.</li>";
     echo "<li>Raw response (first 300 chars): <code>" . htmlspecialchars(substr($resp,0,300)) . "</code></li></ul>";

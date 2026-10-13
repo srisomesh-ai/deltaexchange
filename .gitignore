@@ -1,3 +1,5 @@
 # NEVER commit real secrets
 delta-config.php
 delta-config-testnet.php
+somu-settings.json
+somu-settings.php
