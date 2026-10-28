@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v65</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v66</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -256,6 +256,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
             <div class="st" id="rsStateWrap"><span id="rsLight" style="width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block"></span><span id="rsState">Robot Off</span></div>
             <div class="dt" id="rsDetail">Turn on the engine, then auto-pilot to arm the robot.</div>
             <button onclick="whyNoTrades()" style="margin-top:9px;font-size:11px;padding:6px 12px">🔍 Why no trades?</button>
+            <button onclick="cleanLeftoversNow()" style="margin-top:9px;font-size:11px;padding:6px 12px">🧹 Clean leftover orders</button>
             <div id="whyOut" style="display:none;margin-top:8px;font-size:11px;line-height:1.5"></div>
           </div>
           <div class="gauge">
@@ -311,7 +312,10 @@ if(sessionStorage.getItem('dx_auth')==='1'){
             <div class="fld"><label>Max loss per day ($)</label><input id="dailyLimit" type="number" step="any" value="3" placeholder="3"></div>
             <div class="fld"><label>Max lots per trade</label><input id="botMaxLots" type="number" step="1" value="50"></div>
           </div>
-          <div class="fld"><label>Trailing gap % (profit-lock distance)</label><input id="trailStep" type="number" step="0.1" min="0.2" value="2"></div>
+          <div class="row2">
+            <div class="fld"><label>Trailing gap % (profit-lock distance)</label><input id="trailStep" type="number" step="0.1" min="0.2" value="2"></div>
+            <div class="fld"><label>Wait between trades (min)</label><input id="botWait" type="number" step="1" min="0" value="10"></div>
+          </div>
           <label style="display:flex;gap:8px;align-items:flex-start;font-size:11px;line-height:1.45;margin:2px 0 10px;cursor:pointer">
             <input type="checkbox" id="smartOn" checked style="margin-top:2px">
             <span><b>Smart entries</b> — only fade coins with funding ≥ 3% when the order book agrees (the best pattern in your trade journal). Fewer trades, no momentum chasing. Untick to trade every ≥1% mover.</span>
@@ -694,6 +698,7 @@ function saveCfg(){
 /* ================= PROXY (authenticated) ================= */
 async function proxy(method,path,{query='',body=null}={}){
   if(!PROXY){throw new Error('proxy not set');}
+  query=String(query||'').replace(/,/g,'%2C');   // Delta's own client signs commas as %2C
   const r=await fetch(PROXY,{
     method:'POST',
     headers:{'Content-Type':'application/json','X-Proxy-Token':PTOKEN},
@@ -787,7 +792,7 @@ async function loadPositions(){
       const stillOpen=(j.result||[]).some(p=>+p.size!==0 && (p.product_symbol===rSym||p.product_id===rId));
       if(!stillOpen){
         // robot trade closed — record outcome for tuning stats
-        recordRobotClose();
+        recordRobotClose();markTradeClosed();
         const closedProdId=robotOpenTrade.prodId;
         log('   🤖 position closed (SL/TP hit) — robot free to trade again');
         robotOpenTrade=null;saveRobotTrade();updateRobotStatus();
@@ -846,11 +851,11 @@ function checkGuard(){
 async function loadOrders(){
   if(!PROXY){$('posBox').innerHTML='<div class="dim">Set proxy first.</div>';return;}
   try{
-    const j=await proxy('GET','/v2/orders',{query:'?state=open'});
-    const rows=j.result||[];
+    const {ok,orders:rows}=await activeOrders(null);
+    if(!ok){$('posBox').innerHTML='<div class="r">Could not list orders from Delta.</div>';return;}
     if(!rows.length){$('posBox').innerHTML='<div class="dim">No open orders.</div>';return;}
     $('posBox').innerHTML='<table><tr><th>Sym</th><th>Side</th><th>Size</th><th>Price</th><th></th></tr>'+
-      rows.map(o=>`<tr><td>${o.product_symbol}</td><td class="${o.side==='buy'?'g':'r'}">${o.side}</td><td>${o.size}</td><td>${o.limit_price||'mkt'}</td><td><button onclick="cancelOrder(${o.id},${o.product_id})" style="padding:2px 6px">✕</button></td></tr>`).join('')+'</table>';
+      rows.map(o=>`<tr><td>${o.product_symbol}</td><td class="${o.side==='buy'?'g':'r'}">${o.side}</td><td>${o.size}</td><td>${o.limit_price||(o.stop_price?'stop '+o.stop_price:'mkt')}${isReduceOnly(o)?' <span class="dim">RO</span>':''}</td><td><button onclick="cancelOrder(${o.id},${o.product_id})" style="padding:2px 6px">✕</button></td></tr>`).join('')+'</table>';
   }catch(e){$('posBox').innerHTML='<div class="r">'+e.message+'</div>';}
 }
 async function loadBalance(){
@@ -1128,7 +1133,7 @@ function runSignal(imb){
     journal.push(entry);
     saveJournal();
     $('jCount').textContent=journal.length;
-    log(`▶ ${dir} @ ${fmt(mark,priceDp())}  score=${score.toFixed(2)} [ob${obScore.toFixed(1)} mo${momPct.toFixed(2)} oi${(oiDelta*100).toFixed(1)} fu${(fr*100).toFixed(3)}]`);
+    log(`📈 signal only (no order) ${dir} @ ${fmt(mark,priceDp())}  score=${score.toFixed(2)} [ob${obScore.toFixed(1)} mo${momPct.toFixed(2)} oi${(oiDelta*100).toFixed(1)} fu${(fr*100).toFixed(3)}]`);
 
     // (Auto-execution is handled by the SIMPLE MODE simpleTick loop,
     //  which auto-picks the strongest coin — not just the loaded one.)
@@ -1170,11 +1175,16 @@ try{const rt=localStorage.getItem('dx_robotTrade');if(rt)robotOpenTrade=JSON.par
 
 // ===== STEPPED TRAILING STOP + MOVING TP =====
 let trailBusy=false;
+// Only ONE stop/TP change may run at a time. Without this, a stop move and the 30s protection
+// check (or two overlapping trail checks) could each cancel the other's new stop -> no stop at all.
+let protChain=Promise.resolve();
+function withProtLock(fn){const run=protChain.then(fn,fn);protChain=run.catch(()=>{});return run;}
 // Reliably move the protective stop to newSL: try bracket edit, then fall back to cancel+replace stop order
 // Move protection to new prices. Always places the NEW order first and only then
 // cancels the old one, so the position is never left without a stop.
 // Returns true when the new stop is live (TP move is best-effort; old TP is kept if it fails).
-async function moveStopTo(tr, newSL, newTP){
+function moveStopTo(tr, newSL, newTP){return withProtLock(()=>moveStopToUnlocked(tr, newSL, newTP));}
+async function moveStopToUnlocked(tr, newSL, newTP){
   const closeSide = tr.side==='buy'?'sell':'buy';
   try{
     let newStopId=null, newTpId=null;
@@ -1193,28 +1203,34 @@ async function moveStopTo(tr, newSL, newTP){
     }
     if(!newStopId && !newTpId) return +newSL===+tr.curSL;
     // remove the orders the new ones replaced
-    const oj=await proxy('GET','/v2/orders',{query:'?product_ids='+tr.prodId+'&states=open,untriggered'});
-    const os=oj.result||[];
-    const isStop=o=>(String(o.stop_order_type||'').toLowerCase().includes('stop')||!!o.stop_price);
-    const old=os.filter(o=>o.id && ((newStopId && isStop(o) && o.id!==newStopId) ||
-                                   (newTpId && !isStop(o) && o.order_type==='limit_order' && o.id!==newTpId)));
-    for(const o of old){try{await proxy('DELETE','/v2/orders',{body:{id:o.id,product_id:tr.prodId}});}catch(e){}}
+    const {orders:os}=await activeOrders(tr.prodId);   // if this fails, the protection check removes duplicates later
+    const old=os.filter(o=>o.id && ((newStopId && isStopOrder(o) && o.id!==newStopId) ||
+                                   (newTpId && isTpOrder(o) && o.id!==newTpId)));
+    for(const o of old){await cancelOrderQuiet(o);}
     return newStopId?true:(+newSL===+tr.curSL);
   }catch(e){log('   ⤴ move error: '+e.message);return false;}
 }
 
 async function trailMonitor(){
+  if(trailBusy) return;
+  trailBusy=true;   // claimed before any await, so two checks can never overlap
+  try{ await trailMonitorBody(); } finally { trailBusy=false; }
+}
+async function trailMonitorBody(){
   // periodic naked-position safety check (every ~30s) regardless of trailing toggle
-  if(robotOpenTrade && robotOpenTrade.prodId && !trailBusy){
+  if(robotOpenTrade && robotOpenTrade.prodId){
     const now=Date.now();
     if(now-(window._lastProtCheck||0) > 30000){
       window._lastProtCheck=now;
       const prod=products.find(p=>p.id===robotOpenTrade.prodId||p.symbol===robotOpenTrade.sym);
-      if(prod)verifyProtection(prod, robotOpenTrade.side, robotOpenTrade.size, robotOpenTrade.curSL||robotOpenTrade.entry, robotOpenTrade.curTP||robotOpenTrade.entry);
+      const t=robotOpenTrade, b=t.side==='buy', slp=t.slP||(+$('botSL')?.value||5), tpp=t.tpP||(+$('botTP')?.value||10);
+      const slPx=t.curSL||(b?t.entry*(1-slp/100):t.entry*(1+slp/100));
+      const tpPx=t.curTP||(b?t.entry*(1+tpp/100):t.entry*(1-tpp/100));
+      const tk=t.tick||+prod?.tick_size||0.0001, dp=String(tk).includes('.')?String(tk).split('.')[1].length:0;
+      if(prod)await verifyProtection(prod, t.side, t.size, +(Math.round(slPx/tk)*tk).toFixed(dp), +(Math.round(tpPx/tk)*tk).toFixed(dp));
     }
   }
   if(!robotOpenTrade || !robotOpenTrade.prodId) return;
-  if(trailBusy) return;
   const tr=robotOpenTrade;
   const trailingOn = $('trailOn')?.checked;
 
@@ -1265,7 +1281,6 @@ async function trailMonitor(){
   const toTP = isBuy ? tr.curTP - px : px - tr.curTP;
   const wantTP = toTP < gapPx ? rnd(isBuy ? px + 2*gapPx : px - 2*gapPx) : tr.curTP;
   if(!slMove && wantTP===tr.curTP) return;
-  trailBusy=true;
   try{
     const nSL = slMove ? wantSL : tr.curSL;
     const okMove = await moveStopTo(tr, nSL, wantTP);
@@ -1277,7 +1292,6 @@ async function trailMonitor(){
       saveRobotTrade(); updateRobotStatus();
     }
   }catch(e){log('   ⤴ trail error: '+e.message);}
-  trailBusy=false;
 }
 function updateRobotStatus(){
   if(typeof renderCore==='function')renderCore();
@@ -1508,66 +1522,106 @@ setInterval(()=>{if(PROXY)refreshRobotBalance();},15000);
 // ===== SCANNER-DRIVEN ROBOT: auto-picks best coin from scan, trades it =====
 // ── SAFETY NET: make sure an open position always has a stop-loss ──
 // Runs a few seconds after entry. If no protective stop order exists, places one.
-async function verifyProtection(prod, side, size, sl, tp){
+// List live orders, asking Delta several ways and merging by id (untriggered stops can be
+// reported under a different state name). ok=false means NO query worked: callers must then
+// never conclude "there is no stop" — that guess used to cause duplicate stops and early closes.
+async function activeOrders(prodId){
+  const base=prodId?'?product_ids='+prodId:'';
+  const join=base?base+'&':'?';
+  const byId=new Map(); let ok=false, err=null;
+  for(const q of [base, join+'states=open,pending', join+'states=untriggered']){
+    try{
+      const j=await proxy('GET','/v2/orders',{query:q});
+      if(j.success===false||!Array.isArray(j.result)){err=j.error||err;continue;}
+      ok=true;
+      j.result.forEach(o=>{if(o&&o.id!=null&&!/closed|cancel|filled/i.test(o.state||''))byId.set(o.id,o);});
+    }catch(e){err=e.message;}
+  }
+  if(!ok && Date.now()-(window._ordersErrAt||0)>300000){window._ordersErrAt=Date.now();log('! could not list orders from Delta: '+JSON.stringify(err));}
+  return {ok, orders:[...byId.values()].filter(o=>!prodId||o.product_id==prodId)};
+}
+const isStopOrder=o=>!!(o.stop_price||String(o.stop_order_type||'').toLowerCase().includes('stop'));
+const isReduceOnly=o=>o.reduce_only===true||o.reduce_only==='true';
+const isTpOrder=o=>!isStopOrder(o)&&o.order_type==='limit_order'&&o.reduce_only!==false;
+async function cancelOrderQuiet(o){
+  const d=await proxy('DELETE','/v2/orders',{body:{id:o.id,product_id:o.product_id}}).catch(e=>({success:false,error:e.message}));
+  if(d.success===false){log('   🧹 could not cancel order '+o.id+': '+JSON.stringify(d.error));return false;}
+  return true;
+}
+// Cancel leftover protection orders (stops / reduce-only) on coins that have NO open position.
+let lastSweep=0;
+function sweepLeftovers(force){return withProtLock(()=>sweepLeftoversUnlocked(force));}
+async function sweepLeftoversUnlocked(force){
+  if(!force && Date.now()-lastSweep<60000) return null;
+  lastSweep=Date.now();
+  const pj=await proxy('GET','/v2/positions/margined').catch(()=>({success:false}));
+  if(pj.success===false) return {err:'could not read positions'};
+  const open=new Set((pj.result||[]).filter(p=>+p.size!==0).map(p=>p.product_id));
+  const {ok,orders}=await activeOrders(null);
+  if(!ok) return {err:'could not list orders'};
+  const left=orders.filter(o=>!open.has(o.product_id) && (isReduceOnly(o)||/stop_loss|take_profit/i.test(o.stop_order_type||'')));
+  let n=0; for(const o of left){if(await cancelOrderQuiet(o))n++;}
+  if(left.length)log('🧹 swept '+n+'/'+left.length+' leftover order(s) on coins with no open position');
+  return {found:left.length,done:n,total:orders.length};
+}
+async function cleanLeftoversNow(){
+  const wo=$('whyOut'); if(wo){wo.style.display='block';wo.innerHTML='🧹 checking all your open orders…';}
+  if(!PROXY){if(wo)wo.innerHTML='❌ Proxy not connected.';return;}
+  const r=await sweepLeftovers(true);
+  if(wo)wo.innerHTML=r.err?('❌ '+r.err+' — try again in a minute.'):(r.found?('🧹 Cancelled <b>'+r.done+'</b> of '+r.found+' leftover order(s). Orders still protecting an open position were kept.'):('✓ No leftover orders. '+r.total+' open order(s) all belong to open positions.'));
+}
+window.cleanLeftoversNow=cleanLeftoversNow;
+// wait between trades (persists across refresh)
+function markTradeClosed(){try{localStorage.setItem('dx_lastClose',String(Date.now()));}catch(e){}}
+function cooldownLeftMs(){
+  const w=(+$('botWait')?.value||0)*60000; let lc=0;
+  try{lc=+localStorage.getItem('dx_lastClose')||0;}catch(e){}
+  return Math.max(0, w-(Date.now()-lc));
+}
+function verifyProtection(prod, side, size, sl, tp){return withProtLock(()=>verifyProtectionUnlocked(prod, side, size, sl, tp));}
+async function verifyProtectionUnlocked(prod, side, size, sl, tp){
   try{
-    // is there actually a position?
     const pj=await proxy('GET','/v2/positions/margined');
+    if(pj.success===false)return;
     const pos=(pj.result||[]).find(p=>(p.product_id===prod.id||p.product_symbol===prod.symbol)&&+p.size!==0);
-    if(!pos){return;} // no position (maybe already closed) — nothing to protect
-    // check for existing stop orders on this product
-    const oj=await proxy('GET','/v2/orders',{query:'?product_ids='+prod.id+'&states=open,untriggered'});
-    const orders=oj.result||[];
-    const hasStop=orders.some(o=>(o.stop_order_type||o.order_type||'').toLowerCase().includes('stop') || o.stop_price || o.bracket_stop_loss_price || o.is_bracket_order);
-    if(hasStop){log('   ✓ stop-loss confirmed active on '+prod.symbol);return;}
-    // NO STOP FOUND — place a standalone protective stop-loss now
-    log('   ⚠ NO stop-loss detected on '+prod.symbol+' — placing protective stop now');
-    const placeStop=async(closeSide)=>{
-      const body={
-        product_id:prod.id, product_symbol:prod.symbol,
-        size:Math.abs(+pos.size), side:closeSide,
-        order_type:'market_order',
-        stop_order_type:'stop_loss_order',
-        stop_price:String(sl),
-        stop_trigger_method:'mark_price',
-        reduce_only:true
-      };
-      return proxy('POST','/v2/orders',{body});
+    if(!pos)return;                                   // no position — nothing to protect
+    const {ok,orders}=await activeOrders(prod.id);
+    if(!ok)return;                                    // can't see orders: never guess
+    const stops=orders.filter(isStopOrder), tps=orders.filter(isTpOrder);
+    // duplicates: keep the one nearest the robot's own price, cancel the rest
+    const dedupe=async(list,price,key,label)=>{
+      if(list.length<2)return;
+      list.sort((x,y)=>Math.abs(+x[key]-price)-Math.abs(+y[key]-price));
+      let n=0; for(const o of list.slice(1)){if(await cancelOrderQuiet(o))n++;}
+      log('   🧹 removed '+n+' duplicate '+label+' order(s) on '+prod.symbol);
     };
-    let closeSide = side==='buy'?'sell':'buy';  // opposite side to close
-    let r=await placeStop(closeSide);
-    // SELF-CORRECTION: if rejected, or if it exists then instantly vanishes (Delta cancels
-    // wrong-side reduce-only stops — see Delta email), flip the side and retry once.
-    const rejected = r.success===false && JSON.stringify(r.error||'').toLowerCase().includes('reduce');
-    let placedOk = r.success!==false;
-    if(placedOk){
-      await new Promise(res=>setTimeout(res,2500));
-      const chk=await proxy('GET','/v2/orders',{query:'?product_ids='+prod.id+'&states=open,untriggered'});
-      const still=(chk.result||[]).some(o=>(o.stop_order_type||'').toLowerCase().includes('stop')||o.stop_price);
-      if(!still){placedOk=false;log('   ↺ stop was cancelled by exchange (wrong side?) — flipping side and retrying');}
-    }
-    if(!placedOk || rejected){
-      const flipped = closeSide==='sell'?'buy':'sell';
-      const r2=await placeStop(flipped);
-      if(r2.success!==false){
-        log('   🛡 protective stop placed with FLIPPED side ('+flipped.toUpperCase()+') — dashboard had the direction wrong; correcting record');
-        // correct the stored trade side to match reality
-        if(robotOpenTrade){robotOpenTrade.side = flipped==='sell'?'buy':'sell'; saveRobotTrade(); updateRobotStatus();}
-      }else{
-        log('   🛑 STOP FAILED BOTH SIDES: '+JSON.stringify(r2.error)+' — CLOSE THIS TRADE MANUALLY');
-        const rd=$('rsDetail'); if(rd)rd.innerHTML='<b class="r">⚠ POSITION HAS NO STOP-LOSS — close it manually on Delta!</b>';
-      }
-    }else{
-      log('   🛡 protective stop-loss placed at '+sl+' ✓');
-    }
+    await dedupe(stops,+sl,'stop_price','stop');
+    if(tp!=null)await dedupe(tps,+tp,'limit_price','take-profit');
+    if(stops.length)return;
+    // no stop at all: place ONE, on the side that closes the position
+    const posSide=pos.side?String(pos.side).toLowerCase():side;
+    const closeSide=posSide==='buy'?'sell':'buy';
+    log('   ⚠ NO stop-loss on '+prod.symbol+' — placing one at '+sl);
+    const r=await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:closeSide,
+      order_type:'market_order',stop_order_type:'stop_loss_order',stop_price:String(sl),stop_trigger_method:'mark_price',reduce_only:true}});
+    if(r.success===false){
+      log('   🛑 could not place stop: '+JSON.stringify(r.error)+' — CLOSE THIS TRADE MANUALLY');
+      const rd=$('rsDetail'); if(rd)rd.innerHTML='<b class="r">⚠ POSITION HAS NO STOP-LOSS — close it manually on Delta!</b>';
+    }else log('   🛡 protective stop-loss placed at '+sl+' ✓');
   }catch(e){log('   ⚠ protection check error: '+e.message+' — verify SL manually');}
 }
 // cancel ALL leftover orders on a product after its position closes (stop + take-profit)
-async function cleanupStops(prodId){
+function cleanupStops(prodId){return withProtLock(()=>cleanupStopsUnlocked(prodId));}
+async function cleanupStopsUnlocked(prodId){
   try{
-    const oj=await proxy('GET','/v2/orders',{query:'?product_ids='+prodId+'&states=open,untriggered'});
-    for(const o of (oj.result||[])){
-      if(o.id){try{await proxy('DELETE','/v2/orders',{body:{id:o.id,product_id:prodId}});log('   🧹 cleaned up leftover order '+o.id);}catch(e){}}
-    }
+    // never strip protection from a coin that still has a position
+    const pj=await proxy('GET','/v2/positions/margined');
+    if(pj.success===false){log('   🧹 cleanup postponed (positions unavailable) — the sweep will retry');return;}
+    if((pj.result||[]).some(p=>p.product_id==prodId&&+p.size!==0))return;
+    await proxy('DELETE','/v2/orders/all',{body:{product_id:prodId,cancel_limit_orders:true,cancel_stop_orders:true}}).catch(()=>{});
+    const {ok,orders}=await activeOrders(prodId);
+    let n=0; for(const o of orders){if(await cancelOrderQuiet(o))n++;}
+    log('   🧹 trade closed — cancelled its leftover orders'+(ok?(orders.length?' ('+n+'/'+orders.length+' needed one-by-one)':''):' (could not re-check; sweep will retry)'));
   }catch(e){}
 }
 
@@ -1600,6 +1654,8 @@ async function whyNoTrades(){
     }
     say('✓ no open position blocking');
   }catch(e){say('⚠ could not check positions: '+e.message);}
+  const cdl=cooldownLeftMs();
+  if(cdl>0){say('⏸ Waiting '+Math.ceil(cdl/60000)+' more min after the last trade (Wait between trades in Money Control).');finish();return;}
   await refreshRobotBalance();
   const mc=moneyCfg();
   say('balance $'+availBalance.toFixed(2)+' available · money per trade $'+mc.money+' × '+mc.lev+'x = $'+(mc.money*mc.lev).toFixed(2)+' position');
@@ -1670,7 +1726,7 @@ async function simpleTick(){
       botBusy=false;return;
     }
     if(robotOpenTrade){
-      recordRobotClose();
+      recordRobotClose();markTradeClosed();
       log('trade closed - '+robotOpenTrade.sym);
       const pid=robotOpenTrade.prodId;
       robotOpenTrade=null;saveRobotTrade();updateRobotStatus();
@@ -1689,6 +1745,12 @@ async function simpleTick(){
         setMasterState(false);
         return;
       }
+    }
+    await sweepLeftovers();   // self-heal: cancel leftover orders on coins with no position (max once a minute)
+    const cdl=cooldownLeftMs();
+    if(cdl>0){
+      if(Date.now()-(window._cdLogAt||0)>60000){window._cdLogAt=Date.now();log('⏸ waiting '+Math.ceil(cdl/60000)+' more min after the last trade (Wait between trades)');}
+      botBusy=false;return;
     }
     const tj=await pubGet('/v2/tickers','','live');
     if(!tj.result){log('x scan failed - no ticker data');botBusy=false;return;}
@@ -1746,30 +1808,33 @@ async function simpleTick(){
     if(sr.success===false){
       log('x SL failed: '+JSON.stringify(sr.error)+' -> closing position');
       await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:cs,order_type:'market_order',reduce_only:true}}).catch(()=>{});
+      markTradeClosed();setTimeout(()=>cleanupStops(prod.id),3000);
       botBusy=false;return;
     }
     const tpr=await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:cs,order_type:'limit_order',limit_price:String(tp),reduce_only:true}}).catch(e=>({success:false,error:e.message}));
     if(tpr.success===false)log('! TP note: '+JSON.stringify(tpr.error));
     // VERIFY on the exchange - never assume protection landed
     await new Promise(r=>setTimeout(r,1500));
-    let vj=await proxy('GET','/v2/orders',{query:'?product_ids='+prod.id+'&states=open,untriggered'}).catch(()=>({}));
-    let os=vj.result||[];
-    let stopN=os.filter(o=>o.stop_price||String(o.stop_order_type||'').toLowerCase().includes('stop')).length;
-    let tpN=os.filter(o=>!o.stop_price&&o.order_type==='limit_order').length;
+    let v=await activeOrders(prod.id);
+    let stopN=v.orders.filter(isStopOrder).length, tpN=v.orders.filter(isTpOrder).length;
+    if(!v.ok){
+      log('! could not list orders to double-check - Delta ACCEPTED the stop (order '+(sr.result?.id||'?')+'), keeping the trade; protection check retries every 30s');
+      stopN=1;
+    }
     if(!stopN){
       log('! stop not visible on exchange - retrying SL once');
       const sr2=await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:cs,order_type:'market_order',stop_order_type:'stop_loss_order',stop_price:String(sl),stop_trigger_method:'mark_price',reduce_only:true}}).catch(e=>({success:false,error:e.message}));
       await new Promise(r=>setTimeout(r,1500));
-      vj=await proxy('GET','/v2/orders',{query:'?product_ids='+prod.id+'&states=open,untriggered'}).catch(()=>({}));
-      os=vj.result||[];
-      stopN=os.filter(o=>o.stop_price||String(o.stop_order_type||'').toLowerCase().includes('stop')).length;
+      v=await activeOrders(prod.id);
+      stopN=v.ok?v.orders.filter(isStopOrder).length:1;
       if(!stopN){
         log('x stop STILL not on exchange ('+JSON.stringify(sr2.error||'no error reported')+') -> closing position for safety');
         await proxy('POST','/v2/orders',{body:{product_id:prod.id,size:Math.abs(+pos.size),side:cs,order_type:'market_order',reduce_only:true}}).catch(()=>{});
+        markTradeClosed();setTimeout(()=>cleanupStops(prod.id),3000);
         botBusy=false;return;
       }
     }
-    log('VERIFIED on exchange: '+stopN+' stop + '+tpN+' take-profit active | SL '+sl+' TP '+tp+' (entry '+rnd(entry)+')');
+    log((v.ok?'VERIFIED on exchange: '+stopN+' stop + '+tpN+' take-profit active':'ACCEPTED by Delta (could not double-check)')+' | SL '+sl+' TP '+tp+' (entry '+rnd(entry)+')');
     robotOpenTrade={side:dir,entry,size:Math.abs(+pos.size),sym:pick.sym,prodId:prod.id,tick,slP,tpP,curSL:+sl,curTP:+tp,steps:0,stepPct:(+$('trailStep')?.value||slP)};
     saveRobotTrade();recentCoins=[pick.sym];lastTradeTime=Date.now();
     updateRobotStatus();loadPositions();
@@ -1884,7 +1949,7 @@ $('autoExec')?.addEventListener('change',()=>{
   }
   updateRobotStatus();
 });
-['botMoney','slPct','tpPct','lev','dailyLimit','botCooldown','trailStep','botSL','botTP','botMaxLots','botLev'].forEach(id=>{
+['botMoney','botWait','slPct','tpPct','lev','dailyLimit','botCooldown','trailStep','botSL','botTP','botMaxLots','botLev'].forEach(id=>{
   const el=$(id); if(!el)return;
   // restore saved value
   const saved=localStorage.getItem('dx_set_'+id);

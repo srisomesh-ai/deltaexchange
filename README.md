@@ -70,7 +70,15 @@ Turned on with the **Start Robot** toggle. Every 20 seconds it:
    - then the stop jumps into profit and follows the price one gap behind — it never moves back;
    - when the price gets within one gap of the take-profit, the TP is pushed further out, so a
      trend keeps running and the trailing stop decides the exit.
-   New stop/TP orders are always placed before the old ones are cancelled.
+   New stop/TP orders are always placed before the old ones are cancelled, and only one
+   stop/TP change runs at a time.
+7. **Order housekeeping:**
+   - every 30s it checks the open trade has exactly one stop (and one take-profit) on Delta,
+     places one if missing and cancels duplicates;
+   - when a trade closes it cancels every order left on that coin;
+   - once a minute it cancels leftover stop / reduce-only orders on coins with no position.
+   If Delta's order list can't be read, the robot never guesses "no stop" — it keeps the trade
+   and tries again.
 
 **Money Control panel** (everything you control by hand):
 
@@ -84,6 +92,7 @@ Turned on with the **Start Robot** toggle. Every 20 seconds it:
   the trade much smaller than money × leverage).
 - **Trailing gap % (profit-lock distance)** — see step 6.
 - **Smart entries** — see step 2.
+- **Wait between trades (min)** — pause after a trade closes before the next entry (default 10).
 
 On LIVE the robot refuses to trade (and to arm) while the settings are unsafe: no max loss per day,
 a max loss per day at or above your whole balance, or a stop-loss so wide that Delta would
@@ -100,6 +109,8 @@ rather than trading blind. Deposits/withdrawals during the day move the number t
 The dashboard defaults to **TESTNET**. Arming on LIVE requires a confirmation and typing `LIVE`.
 **🔍 Why no trades?** (under the robot status) runs every check the robot makes, without placing
 an order, and shows which one is stopping it and which coin it would trade next.
+**🧹 Clean leftover orders** (next to it) cancels stop / reduce-only orders left on coins that
+have no open position. Orders protecting an open position, and normal entry orders, are kept.
 
 ## Security notes
 
