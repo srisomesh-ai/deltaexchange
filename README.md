@@ -54,15 +54,23 @@ Turned on with the **Start Robot** toggle. Every 20 seconds it:
 
 1. Checks for an open position. On testnet a leftover position is closed; on LIVE the
    robot never closes your positions — it waits until you close them on Delta.
-2. Scans all perpetuals and picks the strongest mover (≥ 1% move).
-3. Picks a direction: funding ≥ +2% → fade SHORT, funding ≤ −2% → fade LONG,
-   otherwise follow momentum. (High-funding fades were the only profitable group in the
-   trade journal.)
+2. Picks a coin and direction:
+   - **Smart entries (default ON):** only coins with funding ≥ 3% are faded (funding ≥ +3% →
+     SHORT, ≤ −3% → LONG), and only when the live order book leans the same way. This is the
+     best-performing pattern in the trade journal (small sample). Otherwise it waits.
+   - **Smart entries OFF:** strongest mover (≥ 1% move); funding ≥ ±2% → fade, otherwise
+     follow momentum.
 4. Sets your leverage (on LIVE, if Delta refuses it the trade is skipped), sizes the trade as
    `money per trade × leverage ÷ price of 1 lot` (capped by **Max lots**), and enters with a
    market order. Coins where even 1 lot is bigger than that are skipped — it never rounds up.
 5. Places a stop-loss and take-profit, then **verifies on the exchange** that the stop exists.
    If it can't be confirmed after one retry, the position is closed immediately.
+6. **Profit-lock trailing** while the trade is open:
+   - nothing moves until the trade is up by the **Trailing gap %** plus fees (room to breathe);
+   - then the stop jumps into profit and follows the price one gap behind — it never moves back;
+   - when the price gets within one gap of the take-profit, the TP is pushed further out, so a
+     trend keeps running and the trailing stop decides the exit.
+   New stop/TP orders are always placed before the old ones are cancelled.
 
 **Money Control panel** (everything you control by hand):
 
@@ -72,7 +80,14 @@ Turned on with the **Start Robot** toggle. Every 20 seconds it:
 - **Leverage (x)** — position size = money × leverage (e.g. $5 × 2x = $10 position).
 - **Stop-loss % / Take-profit %** — the panel shows what each one means in dollars, fees included (estimate).
 - **Max loss per day ($)** — required for LIVE; the robot switches itself off when today's loss reaches it.
-- **Max lots per trade** — extra cap on size.
+- **Max lots per trade** — extra cap on size (lots, not dollars: on cheap coins a low cap can make
+  the trade much smaller than money × leverage).
+- **Trailing gap % (profit-lock distance)** — see step 6.
+- **Smart entries** — see step 2.
+
+On LIVE the robot refuses to trade (and to arm) while the settings are unsafe: no max loss per day,
+a max loss per day at or above your whole balance, or a stop-loss so wide that Delta would
+liquidate the position first at your leverage.
 
 The LIVE confirmation shows your real balance and these numbers in dollars before you type `LIVE`.
 
@@ -82,7 +97,6 @@ fees count). When the loss reaches the limit it switches itself **off** and bloc
 an open trade keeps its SL/TP. If the check can't read your balance, the robot skips the entry
 rather than trading blind. Deposits/withdrawals during the day move the number too. Set it to 0 to disable.
 
-Trail step % (profit-lock) is under **Advanced** in Money Control.
 The dashboard defaults to **TESTNET**. Arming on LIVE requires a confirmation and typing `LIVE`.
 **🔍 Why no trades?** (under the robot status) runs every check the robot makes, without placing
 an order, and shows which one is stopping it and which coin it would trade next.

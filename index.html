@@ -160,7 +160,7 @@ if(sessionStorage.getItem('dx_auth')==='1'){
 </script>
 
 <div class="hdr">
-  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v64</span></div>
+  <div class="logo"><span class="mark">◆</span> Somu Trader <span style="font-size:10px;font-weight:600;color:var(--gold);background:rgba(255,255,255,.1);padding:2px 8px;border-radius:20px;letter-spacing:.5px;margin-left:2px">v65</span></div>
   <span class="badge">DELTA EXCHANGE</span>
   <span id="envPill" class="pill-env"></span>
   <select id="symbol"></select>
@@ -311,10 +311,12 @@ if(sessionStorage.getItem('dx_auth')==='1'){
             <div class="fld"><label>Max loss per day ($)</label><input id="dailyLimit" type="number" step="any" value="3" placeholder="3"></div>
             <div class="fld"><label>Max lots per trade</label><input id="botMaxLots" type="number" step="1" value="50"></div>
           </div>
+          <div class="fld"><label>Trailing gap % (profit-lock distance)</label><input id="trailStep" type="number" step="0.1" min="0.2" value="2"></div>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:11px;line-height:1.45;margin:2px 0 10px;cursor:pointer">
+            <input type="checkbox" id="smartOn" checked style="margin-top:2px">
+            <span><b>Smart entries</b> — only fade coins with funding ≥ 3% when the order book agrees (the best pattern in your trade journal). Fewer trades, no momentum chasing. Untick to trade every ≥1% mover.</span>
+          </label>
           <div id="sizeCalc" class="num" style="font-size:11px;line-height:1.55;background:#f8fafc;border:1px solid var(--line);border-radius:7px;padding:9px 11px;margin-bottom:8px"></div>
-          <details><summary style="cursor:pointer;font-size:11px;color:var(--muted);font-weight:600">Advanced</summary>
-            <div class="fld" style="margin-top:8px"><label>Trail step % (profit-lock)</label><input id="trailStep" type="number" step="0.1" value="0.3"></div>
-          </details>
           <input id="botSize" type="hidden" value="1">
         </div>
       </div>
@@ -1169,40 +1171,38 @@ try{const rt=localStorage.getItem('dx_robotTrade');if(rt)robotOpenTrade=JSON.par
 // ===== STEPPED TRAILING STOP + MOVING TP =====
 let trailBusy=false;
 // Reliably move the protective stop to newSL: try bracket edit, then fall back to cancel+replace stop order
+// Move protection to new prices. Always places the NEW order first and only then
+// cancels the old one, so the position is never left without a stop.
+// Returns true when the new stop is live (TP move is best-effort; old TP is kept if it fails).
 async function moveStopTo(tr, newSL, newTP){
-  // attempt 1: bracket edit
+  const closeSide = tr.side==='buy'?'sell':'buy';
   try{
-    const body={
-      product_id:tr.prodId,
-      bracket_stop_loss_price:String(newSL), bracket_stop_loss_limit_price:String(newSL),
-      bracket_take_profit_price:String(newTP), bracket_take_profit_limit_price:String(newTP),
-      bracket_stop_trigger_method:'mark_price'
-    };
-    const jr=await proxy('POST','/v2/orders/bracket',{body});
-    if(jr.success!==false) return true;
-  }catch(e){}
-  // attempt 2: place a FRESH stop first, only then cancel the old ones.
-  // (Never cancel-first: if the new placement failed, the position would be left naked.)
-  try{
-    const closeSide = tr.side==='buy'?'sell':'buy';
-    const body={
-      product_id:tr.prodId, size:tr.size, side:closeSide,
-      order_type:'market_order', stop_order_type:'stop_loss_order',
-      stop_price:String(newSL), stop_trigger_method:'mark_price', reduce_only:true
-    };
-    const r=await proxy('POST','/v2/orders',{body});
-    if(r.success===false){log('   ⤴ stop replace failed: '+JSON.stringify(r.error));return false;}
-    // new stop is live — now remove the old ones so only one remains
-    const oj=await proxy('GET','/v2/orders',{query:'?product_ids='+tr.prodId+'&states=open,untriggered'});
-    const stops=(oj.result||[]).filter(o=>((o.stop_order_type||'').toLowerCase().includes('stop')||o.stop_price));
-    // keep the newest (highest id assumed newest); cancel the rest
-    stops.sort((a,b)=>(b.id||0)-(a.id||0));
-    for(const o of stops.slice(1)){
-      if(o.id){try{await proxy('DELETE','/v2/orders',{body:{id:o.id,product_id:tr.prodId}});}catch(e){}}
+    let newStopId=null, newTpId=null;
+    if(+newSL!==+tr.curSL){
+      const r=await proxy('POST','/v2/orders',{body:{product_id:tr.prodId,size:tr.size,side:closeSide,
+        order_type:'market_order',stop_order_type:'stop_loss_order',stop_price:String(newSL),
+        stop_trigger_method:'mark_price',reduce_only:true}});
+      if(r.success===false){log('   ⤴ stop move failed: '+JSON.stringify(r.error)+' (old stop kept)');return false;}
+      newStopId=r.result?.id||null;
     }
-    return true;
-  }catch(e){return false;}
+    if(newTP!=null && +newTP!==+tr.curTP){
+      const t=await proxy('POST','/v2/orders',{body:{product_id:tr.prodId,size:tr.size,side:closeSide,
+        order_type:'limit_order',limit_price:String(newTP),reduce_only:true}}).catch(e=>({success:false,error:e.message}));
+      if(t.success===false)log('   ⤴ TP extend failed: '+JSON.stringify(t.error)+' (old TP kept)');
+      else newTpId=t.result?.id||null;
+    }
+    if(!newStopId && !newTpId) return +newSL===+tr.curSL;
+    // remove the orders the new ones replaced
+    const oj=await proxy('GET','/v2/orders',{query:'?product_ids='+tr.prodId+'&states=open,untriggered'});
+    const os=oj.result||[];
+    const isStop=o=>(String(o.stop_order_type||'').toLowerCase().includes('stop')||!!o.stop_price);
+    const old=os.filter(o=>o.id && ((newStopId && isStop(o) && o.id!==newStopId) ||
+                                   (newTpId && !isStop(o) && o.order_type==='limit_order' && o.id!==newTpId)));
+    for(const o of old){try{await proxy('DELETE','/v2/orders',{body:{id:o.id,product_id:tr.prodId}});}catch(e){}}
+    return newStopId?true:(+newSL===+tr.curSL);
+  }catch(e){log('   ⤴ move error: '+e.message);return false;}
 }
+
 async function trailMonitor(){
   // periodic naked-position safety check (every ~30s) regardless of trailing toggle
   if(robotOpenTrade && robotOpenTrade.prodId && !trailBusy){
@@ -1215,8 +1215,6 @@ async function trailMonitor(){
   }
   if(!robotOpenTrade || !robotOpenTrade.prodId) return;
   if(trailBusy) return;
-  // Note: breakeven-lock + trailing now run for ANY open robot trade.
-  // The trailOn toggle only controls the *stepped trailing*; breakeven always protects.
   const tr=robotOpenTrade;
   const trailingOn = $('trailOn')?.checked;
 
@@ -1244,52 +1242,39 @@ async function trailMonitor(){
     log('   ⤴ trailing re-armed on reconnected trade '+tr.sym);
   }
 
+  // PROFIT-RUN TRAILING (v65)
+  // 1) Room to breathe: nothing moves until the trade is up by one trailing gap + fees.
+  // 2) Then the stop jumps into profit and follows the price, one gap behind. Never moves back.
+  // 3) When price gets within one gap of the take-profit, the TP is pushed further out,
+  //    so a strong trend keeps running and the trailing stop decides the exit.
+  if(!trailingOn) return;
   const isBuy = tr.side==='buy';
-  const stepFrac = (tr.stepPct||tr.slP||0.3)/100;
-  const step = tr.entry*stepFrac;                 // price distance of one step
+  const gapPct = Math.max(0.2, +$('trailStep')?.value || tr.stepPct || 1);
+  const gapPx = tr.entry*gapPct/100;
+  const feePx = tr.entry*FEE_RT;
   const favMove = isBuy ? (px - tr.entry) : (tr.entry - px);
-
-  // ── BREAKEVEN LOCK ──
-  // The moment the trade is in profit (past a small buffer to cover fees),
-  // snap the stop to entry so a winner can never become a loss. Done once.
-  const feeBuffer = tr.entry*0.0008;              // ~0.08% covers taker fees both sides
-  if(!tr.beLocked && favMove > feeBuffer){
-    const rnd0 = v => {const t=tr.tick||0.5; const dp=String(t).includes('.')?String(t).split('.')[1].length:0; return +(Math.round(v/t)*t).toFixed(dp);};
-    const beSL = isBuy ? rnd0(tr.entry + feeBuffer) : rnd0(tr.entry - feeBuffer);
-    trailBusy=true;
-    const okMove = await moveStopTo(tr, beSL, tr.curTP);
-    if(okMove){
-      tr.curSL = beSL; tr.beLocked = true;
-      saveRobotTrade(); updateRobotStatus();
-      log('   🛡 BREAKEVEN LOCKED — stop moved to '+beSL+' (entry). This trade can no longer lose.');
-    }else{
-      log('   🛡 breakeven move failed — will retry next cycle');
-    }
-    trailBusy=false;
-    return;
-  }
-
-  if(!trailingOn) return;   // stepped trailing only if toggle on (breakeven above always runs)
-  const stepsNow = Math.floor(favMove/step);
-  if(stepsNow <= tr.steps) return;                // no new step cleared
+  if(favMove < gapPx + feePx) return;                       // still giving it room
+  const t0=tr.tick||0.5, dp=String(t0).includes('.')?String(t0).split('.')[1].length:0;
+  const rnd=v=>+(Math.round(v/t0)*t0).toFixed(dp);
+  const floorSL = isBuy ? tr.entry+feePx : tr.entry-feePx;  // at least breakeven after fees
+  let wantSL = isBuy ? Math.max(px-gapPx, floorSL) : Math.min(px+gapPx, floorSL);
+  wantSL = rnd(wantSL);
+  // only move when it improves the stop by a meaningful amount (avoids spamming orders)
+  const better = isBuy ? wantSL - tr.curSL : tr.curSL - wantSL;
+  const slMove = better >= Math.max(gapPx*0.25, t0);
+  const toTP = isBuy ? tr.curTP - px : px - tr.curTP;
+  const wantTP = toTP < gapPx ? rnd(isBuy ? px + 2*gapPx : px - 2*gapPx) : tr.curTP;
+  if(!slMove && wantTP===tr.curTP) return;
   trailBusy=true;
   try{
-    const gained = stepsNow - tr.steps;
-    tr.steps = stepsNow;
-    const rnd = v => {const t=tr.tick||0.5; const dp=String(t).includes('.')?String(t).split('.')[1].length:0; return (Math.round(v/t)*t).toFixed(dp);};
-    const newSL = isBuy ? +tr.curSL + gained*step : +tr.curSL - gained*step;
-    const newTP = isBuy ? +tr.curTP + gained*step : +tr.curTP - gained*step;
-    const nSL=+rnd(newSL), nTP=+rnd(newTP);
-    const okMove = await moveStopTo(tr, nSL, nTP);
+    const nSL = slMove ? wantSL : tr.curSL;
+    const okMove = await moveStopTo(tr, nSL, wantTP);
     if(okMove){
-      tr.curSL=nSL; tr.curTP=nTP;
-      const lockedProfit = isBuy ? (tr.curSL - tr.entry) : (tr.entry - tr.curSL);
-      log(`   ⤴ TRAIL step ${tr.steps}: SL→${tr.curSL}  TP→${tr.curTP}  ${lockedProfit>0?'🔒 locked +'+fmt(lockedProfit,priceDp()):'breakeven'}`);
-      saveRobotTrade();
-      updateRobotStatus();
-    }else{
-      tr.steps=stepsNow-gained; // revert step count so it retries
-      log('   ⤴ trail move failed — will retry');
+      const tpMoved = wantTP!==tr.curTP;
+      tr.curSL=nSL; tr.curTP=wantTP; tr.beLocked=true; tr.steps=(tr.steps||0)+1;
+      const locked = isBuy ? (tr.curSL - tr.entry) : (tr.entry - tr.curSL);
+      log(`   ⤴ PROFIT-LOCK: SL→${tr.curSL}${tpMoved?'  TP extended→'+tr.curTP:''}  🔒 +${(locked/tr.entry*100).toFixed(2)}% locked (price ${px}, gap ${gapPct}%)`);
+      saveRobotTrade(); updateRobotStatus();
     }
   }catch(e){log('   ⤴ trail error: '+e.message);}
   trailBusy=false;
@@ -1315,9 +1300,9 @@ function updateRobotStatus(){
     let trailTxt='';
     if($('trailOn')?.checked && t.curSL){
       const locked=(t.side==='buy')?(t.curSL-t.entry):(t.entry-t.curSL);
-      const beBadge = t.beLocked ? ' <span class="g">🛡 breakeven-safe</span>' : '';
+      const beBadge = t.beLocked ? ' <span class="g">🛡 profit locked</span>' : ' <span class="dim">· giving it room</span>';
       const dirNote = t.side==='sell' ? '(short: SL above, TP below)' : '(long: SL below, TP above)';
-      trailTxt=`<br><span style="color:var(--gold-dim)">⤴ SL ${t.curSL} · TP ${t.curTP} · step ${t.steps||0}</span> <span class="dim" style="font-size:10px">${dirNote}</span>${beBadge} ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
+      trailTxt=`<br><span style="color:var(--gold-dim)">⤴ SL ${t.curSL} · TP ${t.curTP} · moves ${t.steps||0}</span> <span class="dim" style="font-size:10px">${dirNote}</span>${beBadge} ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
     }
     detail.innerHTML=`<b style="color:var(--txt)">${t.sym||cur?.symbol||'position'}</b> · Holding <b>${(t.side||'').toUpperCase()}</b> ${t.size} @ ${fmt(t.entry,priceDp())}${trailTxt}<br><span class="dim">Managed until SL/TP closes it. Won't open another until then.</span>`;
     return;
@@ -1360,7 +1345,7 @@ function updateRobotStatus(){
     if($('trailOn')?.checked && t.curSL){
       const isBuy=t.side==='buy';
       const locked=isBuy?(t.curSL-t.entry):(t.entry-t.curSL);
-      trailTxt=`<br><span style="color:var(--gold)">⤴ SL ${t.curSL} · TP ${t.curTP} · step ${t.steps||0}</span> ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
+      trailTxt=`<br><span style="color:var(--gold)">⤴ SL ${t.curSL} · TP ${t.curTP} · moves ${t.steps||0}</span> ${locked>0?'<span class="g">🔒 +'+fmt(locked,priceDp())+' locked</span>':''}`;
     }
     detail.innerHTML=`<b style="font-size:13px;color:var(--txt)">Trading: ${t.sym||cur.symbol}</b><br>Holding <b>${t.side.toUpperCase()}</b> ${t.size} @ ${fmt(t.entry,priceDp())}${trailTxt}`;
   }else{
@@ -1433,13 +1418,67 @@ function updateSizeCalc(){
   const el=$('sizeCalc'); if(!el)return;
   const c=moneyCfg(), pos=c.money*c.lev;
   const slLoss=pos*c.sl/100, tpWin=pos*c.tp/100, fee=pos*FEE_RT;
+  const gap=Math.max(0.2,+$('trailStep')?.value||1);
   let warn='';
   if(!(c.money>0))warn='<div class="r">⚠ Set Money per trade — robot will not trade with $0.</div>';
   else if(availBalance && c.money>availBalance)warn='<div class="r">⚠ Money per trade ($'+fmt(c.money,2)+') is more than your available balance ($'+fmt(availBalance,2)+') — robot will not trade.</div>';
-  if(!(c.dayMax>0))warn+='<div class="r">⚠ No max loss per day set — LIVE arming is refused.</div>';
+  settingsProblems(c).forEach(m=>{warn+='<div class="r">⚠ '+m+' LIVE trading is refused until fixed.</div>';});
   el.innerHTML=`Each trade: <b>$${fmt(c.money,2)}</b> × <b>${c.lev}x</b> = <b>$${fmt(pos,2)}</b> position<br>`+
     `Stop-loss hit ≈ <b class="r">−$${fmt(slLoss+fee,2)}</b> · take-profit ≈ <b class="g">+$${fmt(tpWin-fee,2)}</b> <span class="dim">(incl. ≈$${fmt(fee,2)} fees)</span><br>`+
+    `Profit-lock: once the trade is up <b>${gap}%</b> (+fees) the stop moves into profit and follows <b>${gap}%</b> behind the price; the TP is pushed further while it keeps going.<br>`+
     `Robot switches itself OFF after losing <b>$${fmt(c.dayMax,2)}</b> today. Coins where 1 lot is bigger than $${fmt(pos,2)} are skipped.`+warn;
+}
+// settings that make a LIVE trade unsafe — robot refuses to trade LIVE while any are present
+function settingsProblems(c){
+  const out=[];
+  if(!(c.dayMax>0))out.push('No max loss per day set.');
+  else if(availBalance && c.dayMax>=availBalance)out.push('Max loss per day ($'+fmt(c.dayMax,2)+') is more than your whole balance ($'+fmt(availBalance,2)+') — that is not a limit. Set it lower, e.g. $'+fmt(Math.max(1,availBalance*0.1),0)+'.');
+  const liq=100/c.lev;   // rough % move that wipes out the margin at this leverage
+  if(c.sl>=liq*0.8)out.push('Stop-loss '+c.sl+'% is too close to liquidation at '+c.lev+'x (≈'+liq.toFixed(0)+'% move) — Delta could liquidate before your stop. Lower the stop-loss or the leverage.');
+  return out;
+}
+const SMART_FUND=3;   // funding % (same scale as the journal analysis) needed for a smart entry
+function smartOn(){return $('smartOn')?$('smartOn').checked:true;}
+async function bookBidShare(sym){
+  const j=await pubGet('/v2/l2orderbook/'+sym,'','live');
+  const res=j.result||{};
+  const sum=a=>(a||[]).slice(0,10).reduce((x,l)=>x+(+l.size||0),0);
+  const bid=sum(res.buy), ask=sum(res.sell);
+  return (bid+ask)>0 ? bid/(bid+ask) : null;
+}
+// One place that decides the next trade — used by the robot AND by "Why no trades?".
+// note(msg) receives a plain-words reason for every coin it looks at.
+async function choosePick(movers, note){
+  const mc=moneyCfg();
+  const fits=m=>computeContracts(products.find(p=>p.symbol===m.sym),m.mark)>=1;
+  const listed=m=>products.some(p=>p.symbol===m.sym);
+  if(smartOn()){
+    const cands=movers.filter(m=>Math.abs(m.fundPct)>=SMART_FUND).slice(0,6);
+    if(!cands.length){note('no coin has funding ≥ '+SMART_FUND+'% right now (top: '+(movers.slice().sort((a,b)=>Math.abs(b.fundPct)-Math.abs(a.fundPct))[0]?.sym||'none')+' '+(movers.length?Math.max(...movers.map(m=>Math.abs(m.fundPct))).toFixed(2):'0')+'%) — waiting');return null;}
+    for(const m of cands){
+      const tag=m.sym+' funding '+m.fundPct.toFixed(2)+'%';
+      if(m.sym===recentCoins[0]){note(tag+': just traded — skipped this round');continue;}
+      if(!listed(m)){note(tag+': not listed on '+ENV);continue;}
+      if(!fits(m)){note(tag+': 1 lot is bigger than your $'+(mc.money*mc.lev).toFixed(2)+' position');continue;}
+      const dir=m.fundPct>0?'sell':'buy';
+      let share=null; try{share=await bookBidShare(m.sym);}catch(e){}
+      if(share==null){note(tag+': order book unavailable — skipped');continue;}
+      const agrees=(dir==='buy'&&share>0.5)||(dir==='sell'&&share<0.5);
+      if(!agrees){note(tag+': fade '+(dir==='sell'?'SHORT':'LONG')+' but order book disagrees (bid share '+(share*100).toFixed(0)+'%) — skipped');continue;}
+      return {pick:m,dir,why:'SMART: funding '+m.fundPct.toFixed(1)+'% = crowded '+(dir==='sell'?'longs':'shorts')+' -> fade '+(dir==='sell'?'SHORT':'LONG')+', order book agrees (bid share '+(share*100).toFixed(0)+'%)'};
+    }
+    return null;
+  }
+  const tradeable=movers.filter(m=>Math.abs(m.chg)>=1 && m.sym!==recentCoins[0] && listed(m));
+  const pick=tradeable.find(fits);
+  if(!pick){
+    if(tradeable.length)note(tradeable.length+' mover(s) found but 1 lot of each is bigger than your $'+(mc.money*mc.lev).toFixed(2)+' position');
+    else note('no mover ≥1% tradeable here (top: '+(movers[0]?movers[0].sym+' '+movers[0].chg.toFixed(1)+'%':'none')+')');
+    return null;
+  }
+  if(pick.fundPct>=2)return {pick,dir:'sell',why:'funding +'+pick.fundPct.toFixed(1)+'% = crowded longs -> fade SHORT'};
+  if(pick.fundPct<=-2)return {pick,dir:'buy',why:'funding '+pick.fundPct.toFixed(1)+'% = crowded shorts -> fade LONG'};
+  return {pick,dir:pick.chg>0?'buy':'sell',why:'momentum follow ('+pick.chg.toFixed(1)+'%, funding mild '+pick.fundPct.toFixed(2)+'%)'};
 }
 // real balance from Delta for the robot panel (does not touch the Account tab)
 async function refreshRobotBalance(){
@@ -1574,28 +1613,18 @@ async function whyNoTrades(){
       say('✓ loss limit ok: today '+dp.toFixed(2)+' (limit -'+Math.abs(lossLim)+')');
     }catch(e){say('❌ loss-limit check failed ('+e.message+') — robot skips entries until it works.');finish();return;}
   }else say('⚠ no daily loss limit set — robot has no loss cap');
-  say('— scanning market (same rules as the robot)…');
+  if(ENV!=='testnet'){const probs=settingsProblems(mc);if(probs.length){probs.forEach(m=>say('❌ '+m));say('⛔ LIVE trading is refused until these are fixed in Money Control.');finish();return;}}
+  say('— scanning market (same rules as the robot)… mode: '+(smartOn()?'SMART (funding ≥ '+SMART_FUND+'% fade + order book agrees)':'every ≥1% mover'));
   try{
     const tj=await pubGet('/v2/tickers','','live');
     if(!tj.result){say('❌ scan failed - no ticker data. Robot skips this tick.');finish();return;}
     const movers=rankMovers(tj.result);
-    say('scan: '+movers.length+' perpetuals ranked · need move ≥1%, tradeable on '+ENV+', not the last coin traded'+(recentCoins[0]?' ('+recentCoins[0]+')':''));
-    let pick=null;
-    for(const m of movers.slice(0,6)){
-      let verdict;
-      if(Math.abs(m.chg)<1)verdict='move '+m.chg.toFixed(2)+'% below 1%';
-      else if(m.sym===recentCoins[0])verdict='just traded — skipped this round';
-      else if(!products.some(p=>p.symbol===m.sym))verdict='not listed on '+ENV;
-      else if(computeContracts(products.find(p=>p.symbol===m.sym),m.mark)<1)verdict='1 lot is bigger than your $'+(mc.money*mc.lev).toFixed(2)+' position — skipped';
-      else{verdict='✓ WOULD TRADE';if(!pick)pick=m;}
-      say('  '+m.sym+' '+(m.chg>=0?'+':'')+m.chg.toFixed(2)+'% · funding '+m.fundPct.toFixed(2)+'%: '+verdict);
-    }
-    if(!pick)pick=movers.find(m=>Math.abs(m.chg)>=1&&m.sym!==recentCoins[0]&&products.some(p=>p.symbol===m.sym)&&computeContracts(products.find(p=>p.symbol===m.sym),m.mark)>=1);
-    if(!pick){say('⛔ No coin qualifies right now — robot will keep scanning every 20s. Quiet market, not a fault.');finish();return;}
-    const dir=pick.fundPct>=2?'SHORT (funding fade)':pick.fundPct<=-2?'LONG (funding fade)':(pick.chg>0?'LONG':'SHORT')+' (momentum)';
+    const choice=await choosePick(movers, m=>say('  '+m));
+    if(!choice){say('⛔ No coin qualifies right now — robot keeps checking every 20s. Waiting is normal in smart mode.');finish();return;}
+    const {pick,dir,why}=choice;
     const prod=products.find(p=>p.symbol===pick.sym);
     const lots=computeContracts(prod,pick.mark);
-    say('➡ next entry would be '+pick.sym+' '+dir+', '+lots+' lots ≈ $'+(lots*pick.mark*(+prod.contract_value||1)).toFixed(2)+' position');
+    say('➡ next entry would be '+pick.sym+' '+dir.toUpperCase()+', '+lots+' lots ≈ $'+(lots*pick.mark*(+prod.contract_value||1)).toFixed(2)+' position — '+why);
   }catch(e){say('❌ scan failed: '+e.message);}
   finish();
   function finish(){
@@ -1668,18 +1697,15 @@ async function simpleTick(){
     const mc=moneyCfg();
     if(!(mc.money>0)){log('x Money per trade is $0 - set it in Money Control');botBusy=false;return;}
     if(mc.money>availBalance){log('x Money per trade $'+mc.money+' > available balance $'+availBalance.toFixed(2)+' - not trading');botBusy=false;return;}
-    const movers=rankMovers(tj.result);
-    const tradeable=movers.filter(m=>Math.abs(m.chg)>=1 && m.sym!==recentCoins[0] && products.some(p=>p.symbol===m.sym));
-    const pick=tradeable.find(m=>computeContracts(products.find(p=>p.symbol===m.sym),m.mark)>=1);
-    if(!pick){
-      if(tradeable.length)log('... '+tradeable.length+' mover(s) found but 1 lot of each is bigger than your $'+(mc.money*mc.lev).toFixed(2)+' position (money x leverage) - skipped');
-      else log('... no mover >=1% tradeable here (top: '+(movers[0]?movers[0].sym+' '+movers[0].chg.toFixed(1)+'%':'none')+')');
-      botBusy=false;return;
+    if(ENV!=='testnet'){
+      const probs=settingsProblems(mc);
+      if(probs.length){log('x LIVE trading refused: '+probs.join(' '));botBusy=false;return;}
     }
-    let dir, why;
-    if(pick.fundPct>=2){dir='sell';why='funding +'+pick.fundPct.toFixed(1)+'% = crowded longs -> fade SHORT';}
-    else if(pick.fundPct<=-2){dir='buy';why='funding '+pick.fundPct.toFixed(1)+'% = crowded shorts -> fade LONG';}
-    else{dir=pick.chg>0?'buy':'sell';why='momentum follow ('+pick.chg.toFixed(1)+'%, funding mild '+pick.fundPct.toFixed(2)+'%)';}
+    const movers=rankMovers(tj.result);
+    const notes=[];
+    const choice=await choosePick(movers, m=>notes.push(m));
+    if(!choice){log('... '+(notes.slice(-1)[0]||'nothing qualifies')+(notes.length>1?' ('+notes.length+' coins checked)':''));botBusy=false;return;}
+    const {pick,dir,why}=choice;
     const prod=products.find(p=>p.symbol===pick.sym);
     log('pick: '+pick.sym+' '+pick.chg.toFixed(1)+'% -> '+dir.toUpperCase()+' | '+why);
     const botLev=parseInt($('botLev')?.value)||2;
@@ -1828,12 +1854,18 @@ $('autoExec')?.addEventListener('change',()=>{
           $('autoExec').checked=false; localStorage.setItem('dx_master','0');
           updateRobotStatus(); return;
         }
+        const probs=settingsProblems(mc);
+        if(probs.length){
+          alert('Fix these in Money Control before LIVE trading:\n\n• '+probs.join('\n• '));
+          $('autoExec').checked=false; localStorage.setItem('dx_master','0');
+          updateRobotStatus(); return;
+        }
         if(!(mc.money>0) || !availBalance || mc.money>availBalance){
           alert('Check Money per trade (Money Control panel).\n\nMoney per trade: $'+mc.money+'\nAvailable on Delta: '+(availBalance?'$'+availBalance.toFixed(2):'not loaded — connect the proxy')+'\n\nIt must be more than $0 and not more than your available balance.');
           $('autoExec').checked=false; localStorage.setItem('dx_master','0');
           updateRobotStatus(); return;
         }
-        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nDelta balance: $${availBalance.toFixed(2)} available\nMoney per trade: $${mc.money} × ${mc.lev}x leverage = $${(mc.money*mc.lev).toFixed(2)} position\nStop-loss ${mc.sl}% ≈ −$${(mc.money*mc.lev*(mc.sl/100+FEE_RT)).toFixed(2)} per losing trade\nTake-profit ${mc.tp}%\nMax loss per day: $${mc.dayMax} (robot switches off)\n\nOnce ON, it STAYS ON across refreshes until you turn it off.\n\nContinue?`);
+        ok=confirm(`⚠️ REAL MONEY — LIVE AUTO-TRADING ⚠️\n\nThis will let the robot place REAL orders on your LIVE account and spend REAL money automatically.\n\nEnvironment: LIVE (real funds)\nDelta balance: $${availBalance.toFixed(2)} available\nMoney per trade: $${mc.money} × ${mc.lev}x leverage = $${(mc.money*mc.lev).toFixed(2)} position\nStop-loss ${mc.sl}% ≈ −$${(mc.money*mc.lev*(mc.sl/100+FEE_RT)).toFixed(2)} per losing trade\nTake-profit ${mc.tp}% (extends while the trend continues)\nProfit-lock gap: ${$('trailStep').value}%\nEntries: ${smartOn()?'SMART (funding ≥ '+SMART_FUND+'% fade + order book agrees)':'every ≥1% mover'}\nMax loss per day: $${mc.dayMax} (robot switches off)\n\nOnce ON, it STAYS ON across refreshes until you turn it off.\n\nContinue?`);
         if(ok){
           const typed=prompt('Type  LIVE  (in capitals) to confirm real-money auto-trading:');
           if((typed||'').trim()!=='LIVE'){ok=false;}
@@ -1920,6 +1952,10 @@ function cancelResume(){
 window.cancelResume=cancelResume;
 updateSizeCalc();
 refreshRobotBalance();   // real Delta balance for Money Control (shows a prompt if not connected)
+if($('smartOn')){
+  try{const v=localStorage.getItem('dx_set_smartOn');if(v!==null)$('smartOn').checked=v!=='0';}catch(e){}
+  $('smartOn').addEventListener('change',()=>{try{localStorage.setItem('dx_set_smartOn',$('smartOn').checked?'1':'0');}catch(e){}updateSizeCalc();cloudSaveSoon();});
+}
 updateSizeCalc();
 ['botSize','botScore'].forEach(id=>$(id)?.addEventListener('input',updateRobotStatus));
 updateRobotStatus();
